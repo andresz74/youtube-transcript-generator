@@ -1,8 +1,10 @@
 const express = require('express');
+const cors = require('cors');
 const ytdl = require('ytdl-core');
 const getSubtitles = require('youtube-captions-scraper').getSubtitles;
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 // Existing transcript endpoint
