@@ -92,6 +92,7 @@ app.post('/simple-transcript', async (req, res) => {
         // Prepare the simple response format
         const response = {
             duration: duration,
+            title: videoInfo.videoDetails.title,
             transcript: transcriptText
         };
 
