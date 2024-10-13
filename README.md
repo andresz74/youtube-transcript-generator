@@ -1,6 +1,8 @@
 # YouTube Transcript and Video Info Service
 This is an Express-based service that fetches YouTube video information and transcripts (subtitles) in English. It uses the [ytdl-core](https://github.com/fent/node-ytdl-core) library to extract video metadata and the [youtube-captions-scraper](https://www.npmjs.com/package/youtube-captions-scraper) library to retrieve subtitles from YouTube videos.
 
+![Backend Service](https://objects-us-east-1.dream.io/az-assets/youtube-transcript-generator.png "YouTube Transcript Generator")
+
 ## Features
 - Fetch basic video info like title, author, description, genre, and more.
 - Extract English (auto-generated) subtitles for YouTube videos.
