@@ -4,35 +4,16 @@ const ytdl = require('ytdl-core');
 const getSubtitles = require('youtube-captions-scraper').getSubtitles;
 
 const app = express();
-const corsOptions = {
-    origin: '*', // Allow all origins (or specify specific origins)
-    methods: ['GET', 'POST', 'OPTIONS'], // Allow required methods
-    allowedHeaders: ['Content-Type'], // Allow specific headers
-};
-app.use(cors(corsOptions));
+app.use(cors());
 app.use(express.json());
-app.use((req, res, next) => {
-    console.log('Headers:', req.headers);
-    console.log('Cookies:', req.cookies);
-    next();
-});
-app.use((req, res, next) => {
-    console.log('Body:', req.body);
-    next();
-});
-app.use((req, res, next) => {
-    console.log(`Request Path: ${req.path}, Method: ${req.method}`);
-    next();
-});
-// Catch-all route to debug unmatched requests
-app.use((req, res) => {
-    console.log(`Unmatched Path: ${req.path}, Method: ${req.method}`);
-    res.status(404).send(`Unmatched Path: ${req.path}`);
-});
 
+// Health check route
+app.get('/api/health', (req, res) => {
+    res.send('OK');
+});
 
 // Existing transcript endpoint
-app.post(`api/transcript`, async (req, res) => {
+app.post('/api/transcript', async (req, res) => {
     try {
         const { url } = req.body;
 
@@ -93,11 +74,8 @@ app.post(`api/transcript`, async (req, res) => {
     }
 });
 
-app.post(`api/simple-transcript`, async (req, res) => {
+app.post('/api/simple-transcript', async (req, res) => {
     try {
-        // Allow all origins (CORS)
-        res.setHeader('Access-Control-Allow-Origin', '*');
-
         const { url } = req.body;
 
         // Extract video ID from URL
