@@ -25,7 +25,7 @@ app.use((req, res, next) => {
 const routePrefix = process.env.NODE_ENV === 'production' ? '' : '/api';
 
 // Existing transcript endpoint
-app.post(`${routePrefix}/simple-transcript`, async (req, res) => {
+app.post('/transcript', async (req, res) => {
     try {
         const { url } = req.body;
 
@@ -86,7 +86,7 @@ app.post(`${routePrefix}/simple-transcript`, async (req, res) => {
     }
 });
 
-app.post('/simple-transcript', async (req, res) => {
+app.post(`${routePrefix}/simple-transcript`, async (req, res) => {
     try {
         // Allow all origins (CORS)
         res.setHeader('Access-Control-Allow-Origin', '*');
