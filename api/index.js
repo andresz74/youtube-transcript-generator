@@ -16,6 +16,11 @@ app.use((req, res, next) => {
     console.log('Cookies:', req.cookies);
     next();
 });
+app.use((req, res, next) => {
+    console.log('Body:', req.body);
+    next();
+});
+
 
 // Existing transcript endpoint
 app.post('/transcript', async (req, res) => {
