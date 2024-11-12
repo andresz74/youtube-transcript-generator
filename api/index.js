@@ -24,6 +24,12 @@ app.use((req, res, next) => {
     console.log(`Request Path: ${req.path}, Method: ${req.method}`);
     next();
 });
+// Catch-all route to debug unmatched requests
+app.use((req, res) => {
+    console.log(`Unmatched Path: ${req.path}, Method: ${req.method}`);
+    res.status(404).send(`Unmatched Path: ${req.path}`);
+});
+
 
 // Existing transcript endpoint
 app.post(`api/transcript`, async (req, res) => {
