@@ -20,6 +20,11 @@ app.use((req, res, next) => {
     console.log('Body:', req.body);
     next();
 });
+app.use((req, res, next) => {
+    console.log(`Request Path: ${req.path}, Method: ${req.method}`);
+    next();
+});
+
 
 // Determine prefix based on environment
 const routePrefix = process.env.VERCEL ? '' : '/api';
