@@ -114,7 +114,12 @@ app.post('/simple-transcript', async (req, res) => {
     }
 });
 
-const port = process.env.PORT || 3004;
-app.listen(port, '0.0.0.0', () => {
-    console.log(`Server is running on port ${port}`);
-});
+if (process.env.NODE_ENV !== 'production') {
+    const port = process.env.PORT || 3004;
+    app.listen(port, '0.0.0.0', () => {
+        console.log(`Server is running on port ${port}`);
+    });
+}
+
+// Export the app for serverless environments (e.g., Vercel)
+module.exports = app;
