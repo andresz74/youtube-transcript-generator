@@ -11,6 +11,11 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use((req, res, next) => {
+    console.log('Headers:', req.headers);
+    console.log('Cookies:', req.cookies);
+    next();
+});
 
 // Existing transcript endpoint
 app.post('/transcript', async (req, res) => {
