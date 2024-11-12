@@ -22,10 +22,10 @@ app.use((req, res, next) => {
 });
 
 // Determine prefix based on environment
-const routePrefix = process.env.NODE_ENV === 'production' ? '' : '/api';
+const routePrefix = process.env.VERCEL ? '' : '/api';
 
 // Existing transcript endpoint
-app.post('/transcript', async (req, res) => {
+app.post(`${routePrefix}/transcript`, async (req, res) => {
     try {
         const { url } = req.body;
 
