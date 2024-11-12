@@ -25,12 +25,8 @@ app.use((req, res, next) => {
     next();
 });
 
-
-// Determine prefix based on environment
-const routePrefix = process.env.VERCEL ? '' : '/api';
-
 // Existing transcript endpoint
-app.post(`${routePrefix}/transcript`, async (req, res) => {
+app.post(`api/transcript`, async (req, res) => {
     try {
         const { url } = req.body;
 
@@ -91,7 +87,7 @@ app.post(`${routePrefix}/transcript`, async (req, res) => {
     }
 });
 
-app.post(`${routePrefix}/simple-transcript`, async (req, res) => {
+app.post(`api/simple-transcript`, async (req, res) => {
     try {
         // Allow all origins (CORS)
         res.setHeader('Access-Control-Allow-Origin', '*');
