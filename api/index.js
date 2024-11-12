@@ -86,6 +86,9 @@ app.post('/transcript', async (req, res) => {
 
 app.post('/simple-transcript', async (req, res) => {
     try {
+        // Allow all origins (CORS)
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
         const { url } = req.body;
 
         // Extract video ID from URL
