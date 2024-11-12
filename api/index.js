@@ -21,9 +21,11 @@ app.use((req, res, next) => {
     next();
 });
 
+// Determine prefix based on environment
+const routePrefix = process.env.NODE_ENV === 'production' ? '' : '/api';
 
 // Existing transcript endpoint
-app.post('/transcript', async (req, res) => {
+app.post(`${routePrefix}/simple-transcript`, async (req, res) => {
     try {
         const { url } = req.body;
 
