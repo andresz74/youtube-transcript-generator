@@ -1,17 +1,6 @@
 {
     "version": 2,
-    "routes": [
-        {
-            "src": "/api/simple-transcript",
-            "dest": "/api/index.js"
-        },
-        {
-            "src": "/api/transcript",
-            "dest": "/api/index.js"
-        },
-        {
-            "src": "/api/health",
-            "dest": "/api/index.js"
-        }
+    "rewrites": [
+        { "source": "/(.*)", "destination": "/api" }
     ]
 }

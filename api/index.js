@@ -1,120 +1,95 @@
+require('dotenv').config();
+
+const axios = require('axios');
 const express = require('express');
 const cors = require('cors');
-const ytdl = require('ytdl-core');
 const getSubtitles = require('youtube-captions-scraper').getSubtitles;
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Base route
+app.get('/', (req, res) => res.send('Express on Vercel'));
+
 // Health check route
 app.get('/api/health', (req, res) => {
     res.send('OK');
 });
 
-// Existing transcript endpoint
-app.post('/api/transcript', async (req, res) => {
-    try {
-        const { url } = req.body;
-
-        // Extract video ID from URL
-        const videoId = ytdl.getURLVideoID(url);
-
-        // Get video info (e.g., title, author, etc.)
-        const videoInfo = await ytdl.getBasicInfo(url);
-
-        // Fetch the transcript
-        const transcript = await getSubtitles({
-            videoID: videoId, // youtube video id
-            lang: 'en' // default to English
-        });
-
-        // Prepare the response in the desired format
-        const response = {
-            code: 100000,
-            message: 'success',
-            data: {
-                videoId: videoId,
-                videoInfo: {
-                    name: videoInfo.videoDetails.title,
-                    thumbnailUrl: {
-                        hqdefault: videoInfo.videoDetails.thumbnails[0].url,
-                    },
-                    embedUrl: `https://www.youtube.com/embed/${videoId}`,
-                    duration: videoInfo.videoDetails.lengthSeconds,
-                    description: videoInfo.videoDetails.description,
-                    upload_date: videoInfo.videoDetails.publishDate,
-                    genre: videoInfo.videoDetails.category,
-                    author: videoInfo.videoDetails.author.name,
-                    channel_id: videoInfo.videoDetails.channelId,
-                },
-                language_code: [
-                    {
-                        code: 'en_auto_auto',
-                        name: 'English (auto-generated)'
-                    }
-                ],
-                transcripts: {
-                    en_auto_auto: {
-                        custom: transcript.map((item) => ({
-                            start: item.start,
-                            end: item.start + item.dur,
-                            text: item.text
-                        }))
-                    }
-                }
-            }
-        };
-
-        // Send response
-        res.json(response);
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).json({ message: 'An error occurred while fetching the transcript.' });
-    }
+app.get('/api/debug', (req, res) => {
+    res.json({
+        ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+        region: process.env.VERCEL_REGION || 'local',
+    });
 });
 
 app.post('/api/simple-transcript', async (req, res) => {
     try {
         const { url } = req.body;
 
-        // Extract video ID from URL
-        const videoId = ytdl.getURLVideoID(url);
+        if (!url || !url.includes('youtube.com/watch')) {
+            return res.status(400).json({ message: 'Invalid YouTube URL' });
+        }
 
-        // Get video info (e.g., duration)
-        const videoInfo = await ytdl.getBasicInfo(url);
-        const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60); // Convert to minutes
+        const videoId = new URLSearchParams(new URL(url).search).get('v');
+        if (!videoId) {
+            return res.status(400).json({ message: 'Invalid YouTube URL' });
+        }
 
-        // Fetch the transcript
-        const transcript = await getSubtitles({
-            videoID: videoId,
-            lang: 'en'
+        const apiKey = process.env.YOUTUBE_API_KEY;
+        const videoDetailsResponse = await axios.get(
+            `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${apiKey}&part=snippet,contentDetails`
+        );
+
+        if (videoDetailsResponse.data.items.length === 0) {
+            return res.status(404).json({ message: 'Video not found' });
+        }
+
+        const videoDetails = videoDetailsResponse.data.items[0];
+        const { title } = videoDetails.snippet;
+        const duration = videoDetails.contentDetails.duration;
+
+        // Fetch subtitles
+        let transcriptText = '';
+        try {
+            const transcript = await getSubtitles({
+                videoID: videoId,
+                lang: 'en',
+            });
+
+            transcriptText = transcript.length
+                ? transcript.map((item) => item.text).join(' ') 
+                : 'No captions available for this video. Captions may be restricted in your region.';;
+        } catch (captionError) {
+            console.warn(`Captions not available for video: ${videoId}`);
+        }
+
+        res.json({
+            title,
+            duration,
+            transcript: transcriptText || 'No captions available for this video.',
+        });
+    } catch (error) {
+        console.error('Error Details:', {
+            message: error.message,
+            stack: error.stack,
+            statusCode: error.response?.status,
+            data: error.response?.data,
         });
 
-        // Combine all transcript items into a single string
-        const transcriptText = transcript.map(item => item.text).join(' ');
-
-        // Prepare the simple response format
-        const response = {
-            duration: duration,
-            title: videoInfo.videoDetails.title,
-            transcript: transcriptText
-        };
-
-        // Send the simplified transcript response
-        res.json(response);
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).json({ message: 'An error occurred while fetching the simple transcript.' });
+        res.status(500).json({
+            message: 'An error occurred while processing your request.',
+        });
     }
 });
 
-if (process.env.NODE_ENV !== 'production') {
-    const port = process.env.PORT || 3004;
-    app.listen(port, '0.0.0.0', () => {
-        console.log(`Server is running on port ${port}`);
-    });
-}
+
+// Catch-all route for debugging unmatched paths
+app.use((req, res) => {
+    console.log(`Unmatched Path: ${req.path}`);
+    res.status(404).send(`Unmatched Path: ${req.path}`);
+});
 
 // Export the app for serverless environments (e.g., Vercel)
 module.exports = app;
