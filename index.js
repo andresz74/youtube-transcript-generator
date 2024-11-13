@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const ytdl = require('ytdl-core');
@@ -6,6 +8,19 @@ const getSubtitles = require('youtube-captions-scraper').getSubtitles;
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Health check route
+app.get('/health', (req, res) => {
+    res.send('OK');
+});
+
+// Debug
+app.get('/debug', (req, res) => {
+    res.json({
+        ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+        region: process.env.VERCEL_REGION || 'local',
+    });
+});
 
 // Existing transcript endpoint
 app.post('/transcript', async (req, res) => {
@@ -104,7 +119,7 @@ app.post('/simple-transcript', async (req, res) => {
     }
 });
 
-const port = process.env.PORT || 3004;
+const port = process.env.PORT || 3000;
 app.listen(port, '0.0.0.0', () => {
     console.log(`Server is running on port ${port}`);
 });
