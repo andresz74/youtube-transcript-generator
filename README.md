@@ -149,5 +149,31 @@ Example error response:
 ## Environment Variables
 - `PORT`: The port on which the server will run (default: `3004`).
 
+## PM2 Notes
+- To start service with PM2, better run 
+```bash
+pm2 start ecosystem.config.js
+```
+A `ecosystem.config.js` looks like this:
+```js
+module.exports = {
+    apps: [
+      {
+        name: 'youtube-transcript-generator',
+        script: './index.js',
+        watch: false,
+        env: {
+          PORT: 3004,
+          CHATGPT_VERCEL_URL: 'https://xxxxxxx.vercel.app/api/openai-chat',
+        }
+      }
+    ]
+};
+```
+- To get the logs, run 
+```bash
+pm2 logs youtube-transcript-generator 
+```
+
 ## License
 This project is licensed under the MIT License.

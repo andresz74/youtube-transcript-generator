@@ -171,7 +171,6 @@ app.post('/smart-transcript', async (req, res) => {
 
 // smart-summary endpoint
 app.post('/smart-summary', async (req, res) => {
-    console.log('CHATGPT_VERCEL_URL:', process.env.CHATGPT_VERCEL_URL);
     try {
       const { url, transcript } = req.body;
       if (!url) return res.status(400).json({ message: 'URL is required' });
