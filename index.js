@@ -127,6 +127,7 @@ app.post('/simple-transcript', async (req, res) => {
     }
 });
 
+// smart-transcript endpoint
 app.post('/smart-transcript', async (req, res) => {
   try {
     const { url } = req.body;
@@ -167,7 +168,65 @@ app.post('/smart-transcript', async (req, res) => {
   }
 });
 
-
+// smart-summary endpoint
+app.post('/smart-summary', async (req, res) => {
+    try {
+      const { url, transcript } = req.body;
+      if (!url) return res.status(400).json({ message: 'URL is required' });
+  
+      const videoId = ytdl.getURLVideoID(url);
+  
+      // Initialize Firestore if not already
+      const db = admin.firestore();
+      const docRef = db.collection('summaries').doc(videoId);
+      const docSnap = await docRef.get();
+  
+      if (docSnap.exists) {
+        const data = docSnap.data();
+        if (data.summary) {
+          return res.json({ summary: data.summary, fromCache: true });
+        }
+      }
+  
+      // Use provided transcript or fetch it from YouTube if missing
+      let rawTranscript = transcript;
+  
+      if (!rawTranscript) {
+        const fetchedTranscript = await getSubtitles({
+          videoID: videoId,
+          lang: 'en',
+        });
+        rawTranscript = fetchedTranscript.map((item) => item.text).join(' ');
+      }
+  
+      // Prepare ChatGPT request
+      const chatGptMessages = [
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: `Please summarize this YouTube transcript:\n\n${rawTranscript}` },
+      ];
+  
+      const openaiResponse = await axios.post(
+        'https://chat-gpt-access.vercel.app/api/openai-chat',
+        { chatGptMessages },
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+  
+      const summary = openaiResponse.data.choices?.[0]?.message?.content;
+  
+      if (summary) {
+        await docRef.set({
+          summary,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+  
+      res.json({ summary, fromCache: false });
+    } catch (err) {
+      console.error('Error in /smart-summary:', err);
+      res.status(500).json({ message: 'Error generating smart summary' });
+    }
+  });
+  
 const port = process.env.PORT || 3000;
 app.listen(port, '0.0.0.0', () => {
     console.log(`Server is running on port ${port}`);
