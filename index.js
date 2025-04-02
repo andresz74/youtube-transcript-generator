@@ -183,6 +183,7 @@ app.post('/smart-summary', async (req, res) => {
       const docSnap = await docRef.get();
   
       if (docSnap.exists) {
+        console.log(`Summary found in Firebase for ${videoId}`);
         const data = docSnap.data();
         if (data.summary) {
           return res.json({ summary: data.summary, fromCache: true });
