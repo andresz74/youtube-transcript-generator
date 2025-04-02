@@ -5,6 +5,14 @@ const cors = require('cors');
 const ytdl = require('ytdl-core');
 const getSubtitles = require('youtube-captions-scraper').getSubtitles;
 
+// Firebase Admin SDK
+const admin = require('firebase-admin');
+const serviceAccount = require('./firebaseServiceAccount.json');
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+const db = admin.firestore();
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -85,39 +93,45 @@ app.post('/transcript', async (req, res) => {
 });
 
 app.post('/simple-transcript', async (req, res) => {
-    try {
-        const { url } = req.body;
+  try {
+    const { url } = req.body;
+    const videoId = ytdl.getURLVideoID(url);
 
-        // Extract video ID from URL
-        const videoId = ytdl.getURLVideoID(url);
+    // Check if transcript already exists in Firestore
+    const docRef = db.collection('transcripts').doc(videoId);
+    const doc = await docRef.get();
 
-        // Get video info (e.g., duration)
-        const videoInfo = await ytdl.getBasicInfo(url);
-        const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60); // Convert to minutes
-
-        // Fetch the transcript
-        const transcript = await getSubtitles({
-            videoID: videoId,
-            lang: 'en'
-        });
-
-        // Combine all transcript items into a single string
-        const transcriptText = transcript.map(item => item.text).join(' ');
-
-        // Prepare the simple response format
-        const response = {
-            duration: duration,
-            title: videoInfo.videoDetails.title,
-            transcript: transcriptText
-        };
-
-        // Send the simplified transcript response
-        res.json(response);
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).json({ message: 'An error occurred while fetching the simple transcript.' });
+    if (doc.exists) {
+      console.log(`Transcript found in Firebase for ${videoId}`);
+      return res.json(doc.data());
     }
+
+    // Get video info
+    const videoInfo = await ytdl.getBasicInfo(url);
+    const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
+
+    // Fetch transcript
+    const transcript = await getSubtitles({ videoID: videoId, lang: 'en' });
+    const transcriptText = transcript.map(item => item.text).join(' ');
+
+    const dataToStore = {
+      videoId,
+      title: videoInfo.videoDetails.title,
+      transcript: transcriptText,
+      duration
+    };
+
+    // Save to Firestore
+    await docRef.set(dataToStore);
+    console.log(`Transcript stored in Firebase for ${videoId}`);
+
+    res.json(dataToStore);
+  } catch (error) {
+    console.error('Error fetching/storing transcript:', error);
+    res.status(500).json({ message: 'An error occurred while processing the transcript.' });
+  }
 });
+
 
 const port = process.env.PORT || 3000;
 app.listen(port, '0.0.0.0', () => {
