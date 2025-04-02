@@ -208,7 +208,7 @@ app.post('/smart-summary', async (req, res) => {
       ];
   
       const openaiResponse = await axios.post(
-        'https://chat-gpt-access.vercel.app/api/openai-chat',
+        process.env.CHATGPT_VERCEL_URL,
         { chatGptMessages },
         { headers: { 'Content-Type': 'application/json' } }
       );
