@@ -216,6 +216,7 @@ app.post('/smart-summary', async (req, res) => {
       const summary = openaiResponse.data.choices?.[0]?.message?.content;
   
       if (summary) {
+        console.log(`Summary stored in Firebase for ${videoId}`);
         await docRef.set({
           summary,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
