@@ -105,23 +105,33 @@ app.post('/simple-transcript', async (req, res) => {
         const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60); // Convert to minutes
 
         // Fetch the transcript
-        const transcript = await getSubtitles({
+        
+        try {
+          const transcript = await getSubtitles({
             videoID: videoId,
             lang: 'en'
-        });
+          });
 
-        // Combine all transcript items into a single string
-        const transcriptText = transcript.map(item => item.text).join(' ');
+          if (!transcript || transcript.length === 0) {
+            throw new Error('No English captions available for this video.');
+          }
 
-        // Prepare the simple response format
-        const response = {
-            duration: duration,
-            title: videoInfo.videoDetails.title,
-            transcript: transcriptText
-        };
+          // Combine all transcript items into a single string
+          const transcriptText = transcript.map(item => item.text).join(' ');
 
-        // Send the simplified transcript response
-        res.json(response);
+          // Prepare the simple response format
+          const response = {
+              duration: duration,
+              title: videoInfo.videoDetails.title,
+              transcript: transcriptText
+          };
+
+          // Send the simplified transcript response
+          res.json(response);
+        } catch (transcriptError) {
+          console.error('Error fetching transcript:', transcriptError.message);
+          res.status(404).json({ message: 'No transcript found for this video.' });
+        }
     } catch (error) {
         console.error('Error:', error);
         res.status(500).json({ message: 'An error occurred while fetching the simple transcript.' });
@@ -148,21 +158,30 @@ app.post('/smart-transcript', async (req, res) => {
     const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
 
     // Fetch transcript
-    const transcript = await getSubtitles({ videoID: videoId, lang: 'en' });
-    const transcriptText = transcript.map(item => item.text).join(' ');
+    try {
+      const transcript = await getSubtitles({ videoID: videoId, lang: 'en' });
+      if (!transcript || transcript.length === 0) {
+        throw new Error('No English captions available for this video.');
+      }
 
-    const dataToStore = {
-      videoId,
-      title: videoInfo.videoDetails.title,
-      transcript: transcriptText,
-      duration
-    };
+      const transcriptText = transcript.map(item => item.text).join(' ');
 
-    // Save to Firestore
-    await docRef.set(dataToStore);
-    console.log(`Transcript stored in Firebase for ${videoId}`);
+      const dataToStore = {
+        videoId,
+        title: videoInfo.videoDetails.title,
+        transcript: transcriptText,
+        duration
+      };
 
-    res.json(dataToStore);
+      // Save to Firestore
+      await docRef.set(dataToStore);
+      console.log(`Transcript stored in Firebase for ${videoId}`);
+
+      res.json(dataToStore);
+    } catch (transcriptError) {
+      console.error('Error fetching transcript:', transcriptError.message);
+      res.status(404).json({ message: 'No transcript found for this video.' });
+    }
   } catch (error) {
     console.error('Error fetching/storing transcript:', error);
     res.status(500).json({ message: 'An error occurred while processing the transcript.' });
