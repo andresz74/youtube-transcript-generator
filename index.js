@@ -204,7 +204,7 @@ app.post('/smart-summary', async (req, res) => {
       // Prepare ChatGPT request
       const chatGptMessages = [
         { role: 'system', content: 'You are a helpful assistant.' },
-        { role: 'user', content: `Please summarize this YouTube transcript:\n\n${rawTranscript}` },
+        { role: 'user', content: `In a simple and clear langugae, summarize this YouTube transcript, and highlight the main ideas:\n\n${rawTranscript}` },
       ];
   
       const openaiResponse = await axios.post(
