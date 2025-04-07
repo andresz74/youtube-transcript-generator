@@ -189,68 +189,86 @@ app.post('/smart-transcript', async (req, res) => {
 });
 
 // smart-summary endpoint
+// Model URL mapping
+const modelUrls = {
+  chatgpt: process.env.CHATGPT_VERCEL_URL,
+  deepseek: process.env.DEEPSEEK_VERCEL_URL,
+  // Add new models here, e.g.:
+  // myNewModel: process.env.MY_NEW_MODEL_URL,
+};
+
 app.post('/smart-summary', async (req, res) => {
-    try {
-      const { url, transcript } = req.body;
-      if (!url) return res.status(400).json({ message: 'URL is required' });
-  
-      const videoId = ytdl.getURLVideoID(url);
-  
-      // Initialize Firestore if not already
-      const db = admin.firestore();
-      const docRef = db.collection('summaries').doc(videoId);
-      const docSnap = await docRef.get();
-  
-      if (docSnap.exists) {
-        console.log(`Summary found in Firebase for ${videoId}`);
-        const data = docSnap.data();
-        if (data.summary) {
-          return res.json({ summary: data.summary, fromCache: true });
-        }
+  try {
+    const { url, transcript, model } = req.body;
+    if (!url) return res.status(400).json({ message: 'URL is required' });
+
+    const videoId = ytdl.getURLVideoID(url);
+
+    // Initialize Firestore if not already
+    const db = admin.firestore();
+    const docRef = db.collection('summaries').doc(videoId);
+    const docSnap = await docRef.get();
+
+    if (docSnap.exists) {
+      console.log(`Summary found in Firebase for ${videoId}`);
+      const data = docSnap.data();
+      if (data.summary) {
+        return res.json({ summary: data.summary, fromCache: true });
       }
-  
-      // Use provided transcript or fetch it from YouTube if missing
-      let rawTranscript = transcript;
-  
-      if (!rawTranscript) {
-        const fetchedTranscript = await getSubtitles({
-          videoID: videoId,
-          lang: 'en',
-        });
-        rawTranscript = fetchedTranscript.map((item) => item.text).join(' ');
+    }
+
+    // Use provided transcript or fetch it from YouTube if missing
+    let rawTranscript = transcript;
+
+    if (!rawTranscript) {
+      const fetchedTranscript = await getSubtitles({
+        videoID: videoId,
+        lang: 'en',
+      });
+      rawTranscript = fetchedTranscript.map((item) => item.text).join(' ');
+    }
+
+    // Prepare request to the selected model
+    const chatGptMessages = [
+      { role: 'system', content: 'You are a helpful assistant.' },
+      { role: 'user', content: `In a simple and clear language, summarize this YouTube transcript, and highlight the main ideas:\n\n${rawTranscript}` },
+    ];
+
+    // Check if the model is valid and exists in the mapping
+    const modelUrl = modelUrls[model];
+    if (!modelUrl) {
+      return res.status(400).json({ message: 'Invalid model specified' });
+    }
+
+    const openaiResponse = await axios.post(
+      modelUrl,
+      { chatGptMessages },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 60000, // Timeout in milliseconds (e.g., 60 seconds)
       }
-  
-      // Prepare ChatGPT request
-      const chatGptMessages = [
-        { role: 'system', content: 'You are a helpful assistant.' },
-        { role: 'user', content: `In a simple and clear langugae, summarize this YouTube transcript, and highlight the main ideas:\n\n${rawTranscript}` },
-      ];
-  
-      const openaiResponse = await axios.post(
-        process.env.CHATGPT_VERCEL_URL,
-        { chatGptMessages },
-        { 
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 60000 // Timeout in milliseconds (e.g., 60 seconds)
-        }
-      );
-  
-      const summary = openaiResponse.data.choices?.[0]?.message?.content;
-  
-      if (summary) {
-        console.log(`Summary stored in Firebase for ${videoId}`);
-        await docRef.set({
+    );
+
+    const summary = openaiResponse.data.choices?.[0]?.message?.content;
+
+    if (summary) {
+      console.log(`Summary stored in Firebase for ${videoId}`);
+      await docRef.set(
+        {
           summary,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-      }
-  
-      res.json({ summary, fromCache: false });
-    } catch (err) {
-      console.error('Error in /smart-summary:', err);
-      res.status(500).json({ message: 'Error generating smart summary' });
+        },
+        { merge: true }
+      );
     }
-  });
+
+    res.json({ summary, fromCache: false });
+  } catch (err) {
+    console.error('Error in /smart-summary:', err);
+    res.status(500).json({ message: 'Error generating smart summary' });
+  }
+});
+
   
 const port = process.env.PORT || 3000;
 app.listen(port, '0.0.0.0', () => {
