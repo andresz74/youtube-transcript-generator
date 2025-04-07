@@ -231,7 +231,7 @@ app.post('/smart-summary', async (req, res) => {
         { chatGptMessages },
         { 
           headers: { 'Content-Type': 'application/json' },
-          timeout: 30000 // Timeout in milliseconds (e.g., 30 seconds)
+          timeout: 60000 // Timeout in milliseconds (e.g., 60 seconds)
         }
       );
   
