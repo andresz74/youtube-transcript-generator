@@ -229,7 +229,10 @@ app.post('/smart-summary', async (req, res) => {
       const openaiResponse = await axios.post(
         process.env.CHATGPT_VERCEL_URL,
         { chatGptMessages },
-        { headers: { 'Content-Type': 'application/json' } }
+        { 
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 30000 // Timeout in milliseconds (e.g., 30 seconds)
+        }
       );
   
       const summary = openaiResponse.data.choices?.[0]?.message?.content;
