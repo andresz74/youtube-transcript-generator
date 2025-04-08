@@ -201,6 +201,7 @@ app.post('/smart-summary', async (req, res) => {
   try {
     const { url, transcript, model } = req.body;
     if (!url) return res.status(400).json({ message: 'URL is required' });
+    console.log('URL:', url, ', Transcript:', transcript, ', Model:', model);
 
     const videoId = ytdl.getURLVideoID(url);
 
