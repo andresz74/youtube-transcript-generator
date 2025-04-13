@@ -220,6 +220,11 @@ app.post('/smart-summary', async (req, res) => {
   - Use a simple and clear language
   - Create the output using the formatting above.
   - Output numbered lists, not bullets.
+  - Use ## for section headers.
+  - Use ### for sub-section headers.
+  - Use **bold** for important terms.
+  - Use *italics* for emphasis.
+  - Use [links](https://example.com) for references.
   - Do not output warnings or notes—just the requested sections.
   - Do not repeat items in the output sections.
   - Do not start items with the same opening words.
