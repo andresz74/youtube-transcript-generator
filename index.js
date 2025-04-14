@@ -147,7 +147,6 @@ app.post('/simple-transcript', async (req, res) => {
 });
 
 // smart-transcript endpoint
-// smart-transcript endpoint
 app.post('/smart-transcript', async (req, res) => {
   try {
     const { url } = req.body;
@@ -201,6 +200,7 @@ app.post('/smart-transcript', async (req, res) => {
         videoId,
         title: videoInfo.videoDetails.title,
         duration,
+        transcript: transcriptText,
         chunks: chunks.length,
       });
 
