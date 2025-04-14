@@ -105,23 +105,33 @@ app.post('/simple-transcript', async (req, res) => {
         const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60); // Convert to minutes
 
         // Fetch the transcript
-        const transcript = await getSubtitles({
+        
+        try {
+          const transcript = await getSubtitles({
             videoID: videoId,
             lang: 'en'
-        });
+          });
 
-        // Combine all transcript items into a single string
-        const transcriptText = transcript.map(item => item.text).join(' ');
+          if (!transcript || transcript.length === 0) {
+            throw new Error('No English captions available for this video.');
+          }
 
-        // Prepare the simple response format
-        const response = {
-            duration: duration,
-            title: videoInfo.videoDetails.title,
-            transcript: transcriptText
-        };
+          // Combine all transcript items into a single string
+          const transcriptText = transcript.map(item => item.text).join(' ');
 
-        // Send the simplified transcript response
-        res.json(response);
+          // Prepare the simple response format
+          const response = {
+              duration: duration,
+              title: videoInfo.videoDetails.title,
+              transcript: transcriptText
+          };
+
+          // Send the simplified transcript response
+          res.json(response);
+        } catch (transcriptError) {
+          console.error('Error fetching transcript:', transcriptError.message);
+          res.status(404).json({ message: 'No transcript found for this video.' });
+        }
     } catch (error) {
         console.error('Error:', error);
         res.status(500).json({ message: 'An error occurred while fetching the simple transcript.' });
@@ -148,21 +158,30 @@ app.post('/smart-transcript', async (req, res) => {
     const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
 
     // Fetch transcript
-    const transcript = await getSubtitles({ videoID: videoId, lang: 'en' });
-    const transcriptText = transcript.map(item => item.text).join(' ');
+    try {
+      const transcript = await getSubtitles({ videoID: videoId, lang: 'en' });
+      if (!transcript || transcript.length === 0) {
+        throw new Error('No English captions available for this video.');
+      }
 
-    const dataToStore = {
-      videoId,
-      title: videoInfo.videoDetails.title,
-      transcript: transcriptText,
-      duration
-    };
+      const transcriptText = transcript.map(item => item.text).join(' ');
 
-    // Save to Firestore
-    await docRef.set(dataToStore);
-    console.log(`Transcript stored in Firebase for ${videoId}`);
+      const dataToStore = {
+        videoId,
+        title: videoInfo.videoDetails.title,
+        transcript: transcriptText,
+        duration
+      };
 
-    res.json(dataToStore);
+      // Save to Firestore
+      await docRef.set(dataToStore);
+      console.log(`Transcript stored in Firebase for ${videoId}`);
+
+      res.json(dataToStore);
+    } catch (transcriptError) {
+      console.error('Error fetching transcript:', transcriptError.message);
+      res.status(404).json({ message: 'No transcript found for this video.' });
+    }
   } catch (error) {
     console.error('Error fetching/storing transcript:', error);
     res.status(500).json({ message: 'An error occurred while processing the transcript.' });
@@ -170,95 +189,119 @@ app.post('/smart-transcript', async (req, res) => {
 });
 
 // smart-summary endpoint
+// Model URL mapping
+const modelUrls = {
+  chatgpt: process.env.CHATGPT_VERCEL_URL,
+  deepseek: process.env.DEEPSEEK_VERCEL_URL,
+  // Add new models here, e.g.:
+  // myNewModel: process.env.MY_NEW_MODEL_URL,
+};
+
 app.post('/smart-summary', async (req, res) => {
-    try {
-      const { url, transcript } = req.body;
-      if (!url) return res.status(400).json({ message: 'URL is required' });
-  
-      const videoId = ytdl.getURLVideoID(url);
-  
-      // Initialize Firestore if not already
-      const db = admin.firestore();
-      const docRef = db.collection('summaries').doc(videoId);
-      const docSnap = await docRef.get();
-  
-      if (docSnap.exists) {
-        console.log(`Summary found in Firebase for ${videoId}`);
-        const data = docSnap.data();
-        if (data.summary) {
-          return res.json({ summary: data.summary, fromCache: true });
-        }
+  try {
+    const { url, transcript, model } = req.body;
+    if (!url) return res.status(400).json({ message: 'URL is required' });
+    console.log('URL:', url, ', Model:', model);
+
+    const videoId = ytdl.getURLVideoID(url);
+
+    // Initialize Firestore if not already
+    const db = admin.firestore();
+    const docRef = db.collection('summaries').doc(videoId);
+    const docSnap = await docRef.get();
+
+    if (docSnap.exists) {
+      console.log(`Summary found in Firebase for ${videoId}`);
+      const data = docSnap.data();
+      if (data.summary) {
+        return res.json({ summary: data.summary, fromCache: true });
       }
-  
-      // Use provided transcript or fetch it from YouTube if missing
-      let rawTranscript = transcript;
-  
-      if (!rawTranscript) {
-        const fetchedTranscript = await getSubtitles({
-          videoID: videoId,
-          lang: 'en',
-        });
-        rawTranscript = fetchedTranscript.map((item) => item.text).join(' ');
+    }
+
+    // Use provided transcript or fetch it from YouTube if missing
+    let rawTranscript = transcript;
+
+    if (!rawTranscript) {
+      const fetchedTranscript = await getSubtitles({
+        videoID: videoId,
+        lang: 'en',
+      });
+      rawTranscript = fetchedTranscript.map((item) => item.text).join(' ');
+    }
+
+    // Prepare request to the selected model
+    // Prepare ChatGPT request
+    const systemMessage = {
+      role: 'system',
+      content: `# IDENTITY and PURPOSE
+As an organized, high-skill content summarizer, your role is to extract the most relevant topics from a video transcript and provide a structured summary using bullet points and lists of definitions for each subject.
+Your goal is to help the user understand the content quickly and efficiently.
+You take content in and output a Markdown formatted summary using the format below.
+Take a deep breath and think step by step about how to best accomplish this goal using the following steps.
+
+# OUTPUT SECTIONS
+- Combine all of your understanding of the content into a single, 20-word sentence in a section called ## One Sentence Summary:.
+- Output the 10 most important points of the content as a list with no more than 16 words per point into a section called ## Main Points:.
+- Output a list of the 5 best takeaways from the content in a section called ## Takeaways:.
+
+# OUTPUT INSTRUCTIONS
+- You only output human readable Markdown.
+- Use a simple and clear language
+- Create the output using the formatting above.
+- Output numbered lists, not bullets.
+- Use ## for section headers.
+- Use ### for sub-section headers.
+- Use **bold** for important terms.
+- Use *italics* for emphasis.
+- Use [links](https://example.com) for references.
+- Do not output warnings or notes—just the requested sections.
+- Do not repeat items in the output sections.
+- Do not start items with the same opening words.
+- To ensure the summary is easily searchable in the future, keep the structure clear and straightforward.
+# INPUT:
+INPUT:
+`};
+    const userMessage = {
+      role: 'user',
+      content: `${rawTranscript}`
+    };
+    const chatGptMessages = [systemMessage, userMessage];
+
+    // Check if the model is valid and exists in the mapping
+    const modelUrl = modelUrls[model];
+    if (!modelUrl) {
+      return res.status(400).json({ message: 'Invalid model specified' });
+    }
+
+    const openaiResponse = await axios.post(
+      modelUrl,
+      { chatGptMessages },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 120000, // Timeout in milliseconds (e.g., 120 seconds)
       }
-  
-      // Prepare ChatGPT request
-      const systemMessage = {
-        role: 'system',
-        content: `# IDENTITY and PURPOSE
-  As an organized, high-skill content summarizer, your role is to extract the most relevant topics from a video transcript and provide a structured summary using bullet points and lists of definitions for each subject.
-  Your goal is to help the user understand the content quickly and efficiently.
-  You take content in and output a Markdown formatted summary using the format below.
-  Take a deep breath and think step by step about how to best accomplish this goal using the following steps.
-  
-  # OUTPUT SECTIONS
-  - Combine all of your understanding of the content into a single, 20-word sentence in a section called ## One Sentence Summary:.
-  - Output the 10 most important points of the content as a list with no more than 16 words per point into a section called ## Main Points:.
-  - Output a list of the 5 best takeaways from the content in a section called ## Takeaways:.
-  
-  # OUTPUT INSTRUCTIONS
-  - You only output human readable Markdown.
-  - Use a simple and clear language
-  - Create the output using the formatting above.
-  - Output numbered lists, not bullets.
-  - Use ## for section headers.
-  - Use ### for sub-section headers.
-  - Use **bold** for important terms.
-  - Use *italics* for emphasis.
-  - Use [links](https://example.com) for references.
-  - Do not output warnings or notes—just the requested sections.
-  - Do not repeat items in the output sections.
-  - Do not start items with the same opening words.
-  - To ensure the summary is easily searchable in the future, keep the structure clear and straightforward.
-  # INPUT:
-  INPUT:
-  `};
-      const userMessage = {
-        role: 'user',
-        content: `${rawTranscript}`
-      };
-      const chatGptMessages = [systemMessage, userMessage];
-      const openaiResponse = await axios.post(
-        process.env.CHATGPT_VERCEL_URL,
-        { chatGptMessages },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-  
-      const summary = openaiResponse.data.choices?.[0]?.message?.content;
-  
-      if (summary) {
-        console.log(`Summary stored in Firebase for ${videoId}`);
-        await docRef.set({
+    );
+
+    const summary = openaiResponse.data.choices?.[0]?.message?.content;
+
+    if (summary) {
+      console.log(`Summary stored in Firebase for ${videoId}`);
+      await docRef.set(
+        {
           summary,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-      }
-  
-      res.json({ summary, fromCache: false });
-    } catch (err) {
-      console.error('Error in /smart-summary:', err);
-      res.status(500).json({ message: 'Error generating smart summary' });
+        },
+        { merge: true }
+      );
     }
-  });
+
+    res.json({ summary, fromCache: false });
+  } catch (err) {
+    console.error('Error in /smart-summary:', err);
+    res.status(500).json({ message: 'Error generating smart summary' });
+  }
+});
+
   
 const port = process.env.PORT || 3000;
 app.listen(port, '0.0.0.0', () => {
