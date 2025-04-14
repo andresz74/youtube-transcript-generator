@@ -147,6 +147,7 @@ app.post('/simple-transcript', async (req, res) => {
 });
 
 // smart-transcript endpoint
+// smart-transcript endpoint
 app.post('/smart-transcript', async (req, res) => {
   try {
     const { url } = req.body;
@@ -163,29 +164,46 @@ app.post('/smart-transcript', async (req, res) => {
 
     // Get video info
     const videoInfo = await ytdl.getBasicInfo(url);
-    const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
+    const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);  // Convert to minutes
 
-    // Fetch transcript
+    // Fetch the transcript
     try {
       const transcript = await getSubtitles({ videoID: videoId, lang: 'en' });
       if (!transcript || transcript.length === 0) {
         throw new Error('No English captions available for this video.');
       }
 
+      // Combine all transcript items into a single string
       const transcriptText = transcript.map(item => item.text).join(' ');
 
-      const dataToStore = {
+      // Chunk the transcript into smaller pieces (e.g., by character limit)
+      const chunkSize = 5000;  // Define a reasonable chunk size (5000 characters in this example)
+      const chunks = [];
+
+      for (let i = 0; i < transcriptText.length; i += chunkSize) {
+        chunks.push(transcriptText.slice(i, i + chunkSize));
+      }
+
+      // Store the chunks in Firestore
+      await docRef.set({
         videoId,
         title: videoInfo.videoDetails.title,
-        transcript: transcriptText,
-        duration
-      };
+        duration,
+        transcript: transcriptText,  // You can also store the full transcript here if needed
+        chunks,  // Store the chunks separately
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
 
-      // Save to Firestore
-      await docRef.set(dataToStore);
-      console.log(`Transcript stored in Firebase for ${videoId}`);
+      console.log(`Full transcript and chunks stored in Firebase for ${videoId}`);
 
-      res.json(dataToStore);
+      // Return a response with the full transcript and chunk information
+      res.json({
+        videoId,
+        title: videoInfo.videoDetails.title,
+        duration,
+        chunks: chunks.length,
+      });
+
     } catch (transcriptError) {
       console.error('Error fetching transcript:', transcriptError.message);
       res.status(404).json({ message: 'No transcript found for this video.' });
@@ -195,6 +213,7 @@ app.post('/smart-transcript', async (req, res) => {
     res.status(500).json({ message: 'An error occurred while processing the transcript.' });
   }
 });
+
 
 // smart-summary endpoint
 // Model URL mapping
