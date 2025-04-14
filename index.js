@@ -18,6 +18,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Increase the limit for JSON body parsing
+app.use(express.json({ limit: '50mb' }));  // Adjust this value as needed
+app.use(express.urlencoded({ limit: '50mb', extended: true }));  // For URL-encoded data
+
 // Health check route
 app.get('/health', (req, res) => {
     res.send('OK');
