@@ -163,29 +163,47 @@ app.post('/smart-transcript', async (req, res) => {
 
     // Get video info
     const videoInfo = await ytdl.getBasicInfo(url);
-    const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
+    const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);  // Convert to minutes
 
-    // Fetch transcript
+    // Fetch the transcript
     try {
       const transcript = await getSubtitles({ videoID: videoId, lang: 'en' });
       if (!transcript || transcript.length === 0) {
         throw new Error('No English captions available for this video.');
       }
 
+      // Combine all transcript items into a single string
       const transcriptText = transcript.map(item => item.text).join(' ');
 
-      const dataToStore = {
+      // Chunk the transcript into smaller pieces (e.g., by character limit)
+      const chunkSize = 5000;  // Define a reasonable chunk size (5000 characters in this example)
+      const chunks = [];
+
+      for (let i = 0; i < transcriptText.length; i += chunkSize) {
+        chunks.push(transcriptText.slice(i, i + chunkSize));
+      }
+
+      // Store the chunks in Firestore
+      await docRef.set({
         videoId,
         title: videoInfo.videoDetails.title,
+        duration,
+        transcript: transcriptText,  // You can also store the full transcript here if needed
+        chunks,  // Store the chunks separately
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(`Full transcript and chunks stored in Firebase for ${videoId}`);
+
+      // Return a response with the full transcript and chunk information
+      res.json({
+        videoId,
+        title: videoInfo.videoDetails.title,
+        duration,
         transcript: transcriptText,
-        duration
-      };
+        chunks: chunks.length,
+      });
 
-      // Save to Firestore
-      await docRef.set(dataToStore);
-      console.log(`Transcript stored in Firebase for ${videoId}`);
-
-      res.json(dataToStore);
     } catch (transcriptError) {
       console.error('Error fetching transcript:', transcriptError.message);
       res.status(404).json({ message: 'No transcript found for this video.' });
@@ -195,6 +213,7 @@ app.post('/smart-transcript', async (req, res) => {
     res.status(500).json({ message: 'An error occurred while processing the transcript.' });
   }
 });
+
 
 // smart-summary endpoint
 // Model URL mapping
@@ -207,7 +226,7 @@ const modelUrls = {
 
 app.post('/smart-summary', async (req, res) => {
   try {
-    const { url, transcript, model } = req.body;
+    const { url, model } = req.body;
     if (!url) return res.status(400).json({ message: 'URL is required' });
     console.log('URL:', url, ', Model:', model);
 
@@ -226,71 +245,18 @@ app.post('/smart-summary', async (req, res) => {
       }
     }
 
-    // Use provided transcript or fetch it from YouTube if missing
-    let rawTranscript = transcript;
-
-    if (!rawTranscript) {
-      const fetchedTranscript = await getSubtitles({
-        videoID: videoId,
-        lang: 'en',
-      });
-      rawTranscript = fetchedTranscript.map((item) => item.text).join(' ');
-    }
-
-    // Prepare request to the selected model
-    // Prepare ChatGPT request
-    const systemMessage = {
-      role: 'system',
-      content: `# IDENTITY and PURPOSE
-As an organized, high-skill content summarizer, your role is to extract the most relevant topics from a video transcript and provide a structured summary using bullet points and lists of definitions for each subject.
-Your goal is to help the user understand the content quickly and efficiently.
-You take content in and output a Markdown formatted summary using the format below.
-Take a deep breath and think step by step about how to best accomplish this goal using the following steps.
-
-# OUTPUT SECTIONS
-- Combine all of your understanding of the content into a single, 20-word sentence in a section called ## One Sentence Summary:.
-- Output the 10 most important points of the content as a list with no more than 16 words per point into a section called ## Main Points:.
-- Output a list of the 5 best takeaways from the content in a section called ## Takeaways:.
-
-# OUTPUT INSTRUCTIONS
-- You only output human readable Markdown.
-- Use a simple and clear language
-- Create the output using the formatting above.
-- Output numbered lists, not bullets.
-- Use ## for section headers.
-- Use ### for sub-section headers.
-- Use **bold** for important terms.
-- Use *italics* for emphasis.
-- Use [links](https://example.com) for references.
-- Do not output warnings or notes—just the requested sections.
-- Do not repeat items in the output sections.
-- Do not start items with the same opening words.
-- To ensure the summary is easily searchable in the future, keep the structure clear and straightforward.
-# INPUT:
-INPUT:
-`};
-    const userMessage = {
-      role: 'user',
-      content: `${rawTranscript}`
-    };
-    const chatGptMessages = [systemMessage, userMessage];
-
-    // Check if the model is valid and exists in the mapping
+    // Send only the video ID to the Vercel endpoint to fetch the transcript from Firestore and summarize it
     const modelUrl = modelUrls[model];
+    console.log('Model URL:', modelUrl);
     if (!modelUrl) {
       return res.status(400).json({ message: 'Invalid model specified' });
     }
 
-    const openaiResponse = await axios.post(
-      modelUrl,
-      { chatGptMessages },
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 120000, // Timeout in milliseconds (e.g., 120 seconds)
-      }
-    );
+    const response = await axios.post(modelUrl, {
+      videoId  // Only send the video ID
+    });
 
-    const summary = openaiResponse.data.choices?.[0]?.message?.content;
+    const summary = response.data.choices?.[0]?.message?.content;
 
     if (summary) {
       console.log(`Summary stored in Firebase for ${videoId}`);
@@ -309,6 +275,7 @@ INPUT:
     res.status(500).json({ message: 'Error generating smart summary' });
   }
 });
+
 
   
 const port = process.env.PORT || 3000;
