@@ -247,6 +247,7 @@ app.post('/smart-summary', async (req, res) => {
 
     // Send only the video ID to the Vercel endpoint to fetch the transcript from Firestore and summarize it
     const modelUrl = modelUrls[model];
+    console.log('Model URL:', modelUrl);
     if (!modelUrl) {
       return res.status(400).json({ message: 'Invalid model specified' });
     }
