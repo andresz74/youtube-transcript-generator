@@ -220,8 +220,7 @@ app.post('/smart-transcript', async (req, res) => {
 const modelUrls = {
   chatgpt: process.env.CHATGPT_VERCEL_URL,
   deepseek: process.env.DEEPSEEK_VERCEL_URL,
-  // Add new models here, e.g.:
-  // myNewModel: process.env.MY_NEW_MODEL_URL,
+  anthropic: process.env.ANTHROPIC_VERCEL_URL,
 };
 
 app.post('/smart-summary', async (req, res) => {
