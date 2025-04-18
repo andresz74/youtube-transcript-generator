@@ -175,21 +175,12 @@ app.post('/smart-transcript', async (req, res) => {
       // Combine all transcript items into a single string
       const transcriptText = transcript.map(item => item.text).join(' ');
 
-      // Chunk the transcript into smaller pieces (e.g., by character limit)
-      const chunkSize = 5000;  // Define a reasonable chunk size (5000 characters in this example)
-      const chunks = [];
-
-      for (let i = 0; i < transcriptText.length; i += chunkSize) {
-        chunks.push(transcriptText.slice(i, i + chunkSize));
-      }
-
       // Store the chunks in Firestore
       await docRef.set({
         videoId,
         title: videoInfo.videoDetails.title,
         duration,
         transcript: transcriptText,  // You can also store the full transcript here if needed
-        chunks,  // Store the chunks separately
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
