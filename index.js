@@ -165,7 +165,7 @@ app.post('/simple-transcript', async (req, res) => {
 // smart-transcript endpoint
 app.post('/simple-transcript', async (req, res) => {
   try {
-      const { url, lang = 'en' } = req.body; // You can also allow the user to specify the language
+      const { url } = req.body;
 
       // Extract video ID from URL
       const videoId = ytdl.getURLVideoID(url);
@@ -181,21 +181,17 @@ app.post('/simple-transcript', async (req, res) => {
           return res.status(404).json({ message: 'No captions available for this video.' });
       }
 
-      // Check if the requested language is available
-      const selectedCaption = captionTracks.find(caption => caption.languageCode === lang);
-
-      if (!selectedCaption) {
-          return res.status(404).json({ message: `No captions available in the specified language (${lang}).` });
-      }
+      // Select the first available caption track (you can choose based on your preference)
+      const languageCode = captionTracks[0].languageCode;
 
       // Fetch the transcript in the selected language
       const transcript = await getSubtitles({
           videoID: videoId,
-          lang: lang
+          lang: languageCode // Use the language code of the first available caption
       });
 
       if (!transcript || transcript.length === 0) {
-          throw new Error('No captions available for the selected language.');
+          throw new Error(`No captions available in the selected language (${languageCode}).`);
       }
 
       // Combine all transcript items into a single string
@@ -205,7 +201,6 @@ app.post('/simple-transcript', async (req, res) => {
       const response = {
           duration: duration,
           title: videoInfo.videoDetails.title,
-          language: selectedCaption.name.simpleText,
           transcript: transcriptText
       };
 
