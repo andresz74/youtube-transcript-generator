@@ -359,9 +359,9 @@ app.post('/smart-summary-firebase', async (req, res) => {
     const response = await axios.post(modelUrl, {
       videoId  // Only send the video ID
     });
-    console.log('Response from model:', response);
+    console.log('Response from model:', response.data);
 
-    const summary = model === 'anthropic' ? response.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
+    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
 
     if (summary) {
       console.log(`Summary stored in Firebase for ${videoId}`);
