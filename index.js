@@ -41,59 +41,73 @@ app.get('/debug', (req, res) => {
 
 // Existing transcript endpoint
 app.post('/transcript', async (req, res) => {
-    try {
-        const { url } = req.body;
+  try {
+      const { url } = req.body;
 
-        // Extract video ID from URL
-        const videoId = ytdl.getURLVideoID(url);
+      // Extract video ID from URL
+      const videoId = ytdl.getURLVideoID(url);
 
-        // Get video info (e.g., title, author, etc.)
-        const videoInfo = await ytdl.getBasicInfo(url);
+      // Get video info (e.g., title, author, etc.)
+      const videoInfo = await ytdl.getBasicInfo(url);
 
-        // Fetch the transcript
-        const transcript = await getSubtitles({
-            videoID: videoId, // youtube video id
-            lang: 'en' // default to English
-        });
+      // Fetch available captions (subtitles) for the video
+      const captions = await ytdl.getCaptions(videoId);
 
-        // Prepare the response in the desired format
-        const response = {
-            code: 100000,
-            message: 'success',
-            data: {
-                videoId: videoId,
-                videoInfo: {
-                    name: videoInfo.videoDetails.title,
-                    thumbnailUrl: {
-                        hqdefault: videoInfo.videoDetails.thumbnails[0].url,
-                    },
-                    embedUrl: `https://www.youtube.com/embed/${videoId}`,
-                    duration: videoInfo.videoDetails.lengthSeconds,
-                    description: videoInfo.videoDetails.description,
-                    upload_date: videoInfo.videoDetails.publishDate,
-                    genre: videoInfo.videoDetails.category,
-                    author: videoInfo.videoDetails.author.name,
-                    channel_id: videoInfo.videoDetails.channelId,
-                },
-                transcripts: {
-                    en_auto_auto: {
-                        custom: transcript.map((item) => ({
-                            start: item.start,
-                            end: item.start + item.dur,
-                            text: item.text
-                        }))
-                    }
-                }
-            }
-        };
+      if (!captions || captions.length === 0) {
+          return res.status(404).json({ message: 'No captions available for this video.' });
+      }
 
-        // Send response
-        res.json(response);
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).json({ message: 'An error occurred while fetching the transcript.' });
-    }
+      // If available, fetch the first available caption (or choose another language if needed)
+      const languageCode = captions[0].languageCode || 'en'; // You can change this to a preferred language if necessary
+      const transcript = await getSubtitles({
+          videoID: videoId, // youtube video id
+          lang: languageCode // use the language code of the first available caption
+      });
+
+      // Prepare the response in the desired format
+      const response = {
+          code: 100000,
+          message: 'success',
+          data: {
+              videoId: videoId,
+              videoInfo: {
+                  name: videoInfo.videoDetails.title,
+                  thumbnailUrl: {
+                      hqdefault: videoInfo.videoDetails.thumbnails[0].url,
+                  },
+                  embedUrl: `https://www.youtube.com/embed/${videoId}`,
+                  duration: videoInfo.videoDetails.lengthSeconds,
+                  description: videoInfo.videoDetails.description,
+                  upload_date: videoInfo.videoDetails.publishDate,
+                  genre: videoInfo.videoDetails.category,
+                  author: videoInfo.videoDetails.author.name,
+                  channel_id: videoInfo.videoDetails.channelId,
+              },
+              language_code: captions.map(caption => ({
+                  code: caption.languageCode,
+                  name: caption.languageName
+              })),
+              transcripts: captions.reduce((acc, caption) => {
+                  acc[caption.languageCode] = {
+                      custom: transcript.map((item) => ({
+                          start: item.start,
+                          end: item.start + item.dur,
+                          text: item.text
+                      }))
+                  };
+                  return acc;
+              }, {})
+          }
+      };
+
+      // Send response
+      res.json(response);
+  } catch (error) {
+      console.error('Error:', error);
+      res.status(500).json({ message: 'An error occurred while fetching the transcript.' });
+  }
 });
+
 
 app.post('/simple-transcript', async (req, res) => {
     try {
