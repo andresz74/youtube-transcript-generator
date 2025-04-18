@@ -163,64 +163,59 @@ app.post('/simple-transcript', async (req, res) => {
 });
 
 // smart-transcript endpoint
-app.post('/smart-transcript', async (req, res) => {
+app.post('/simple-transcript', async (req, res) => {
   try {
-    const { url } = req.body;
-    const videoId = ytdl.getURLVideoID(url);
+      const { url, lang = 'en' } = req.body; // You can also allow the user to specify the language
 
-    // Check if transcript already exists in Firestore
-    const docRef = db.collection('transcripts').doc(videoId);
-    const doc = await docRef.get();
+      // Extract video ID from URL
+      const videoId = ytdl.getURLVideoID(url);
 
-    if (doc.exists) {
-      console.log(`Transcript found in Firebase for ${videoId}`);
-      return res.json(doc.data());
-    }
+      // Get video info (e.g., duration)
+      const videoInfo = await ytdl.getBasicInfo(url);
+      const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60); // Convert to minutes
 
-    // Get video info
-    const videoInfo = await ytdl.getBasicInfo(url);
-    const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);  // Convert to minutes
+      // Fetch available captions (subtitles) from the video info
+      const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
 
-    // Fetch the transcript
-    try {
-      const transcript = await getSubtitles({ videoID: videoId, lang: 'en' });
+      if (!captionTracks || captionTracks.length === 0) {
+          return res.status(404).json({ message: 'No captions available for this video.' });
+      }
+
+      // Check if the requested language is available
+      const selectedCaption = captionTracks.find(caption => caption.languageCode === lang);
+
+      if (!selectedCaption) {
+          return res.status(404).json({ message: `No captions available in the specified language (${lang}).` });
+      }
+
+      // Fetch the transcript in the selected language
+      const transcript = await getSubtitles({
+          videoID: videoId,
+          lang: lang
+      });
+
       if (!transcript || transcript.length === 0) {
-        throw new Error('No English captions available for this video.');
+          throw new Error('No captions available for the selected language.');
       }
 
       // Combine all transcript items into a single string
       const transcriptText = transcript.map(item => item.text).join(' ');
 
-      // Store the chunks in Firestore
-      await docRef.set({
-        videoId,
-        title: videoInfo.videoDetails.title,
-        duration,
-        transcript: transcriptText,  // You can also store the full transcript here if needed
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      // Prepare the simple response format
+      const response = {
+          duration: duration,
+          title: videoInfo.videoDetails.title,
+          language: selectedCaption.name.simpleText,
+          transcript: transcriptText
+      };
 
-      console.log(`Full transcript and chunks stored in Firebase for ${videoId}`);
-
-      // Return a response with the full transcript and chunk information
-      res.json({
-        videoId,
-        title: videoInfo.videoDetails.title,
-        duration,
-        transcript: transcriptText,
-        chunks: chunks.length,
-      });
-
-    } catch (transcriptError) {
-      console.error('Error fetching transcript:', transcriptError.message);
-      res.status(404).json({ message: 'No transcript found for this video.' });
-    }
+      // Send the simplified transcript response
+      res.json(response);
   } catch (error) {
-    console.error('Error fetching/storing transcript:', error);
-    res.status(500).json({ message: 'An error occurred while processing the transcript.' });
+      console.error('Error:', error);
+      res.status(500).json({ message: 'An error occurred while fetching the simple transcript.' });
   }
 });
-
 
 // smart-summary endpoint
 // Model URL mapping
