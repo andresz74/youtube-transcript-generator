@@ -75,12 +75,6 @@ app.post('/transcript', async (req, res) => {
                     author: videoInfo.videoDetails.author.name,
                     channel_id: videoInfo.videoDetails.channelId,
                 },
-                language_code: [
-                    {
-                        code: 'en_auto_auto',
-                        name: 'English (auto-generated)'
-                    }
-                ],
                 transcripts: {
                     en_auto_auto: {
                         custom: transcript.map((item) => ({
