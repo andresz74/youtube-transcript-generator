@@ -118,52 +118,6 @@ app.post('/transcript', async (req, res) => {
 });
 
 app.post('/simple-transcript', async (req, res) => {
-    try {
-        const { url } = req.body;
-
-        // Extract video ID from URL
-        const videoId = ytdl.getURLVideoID(url);
-
-        // Get video info (e.g., duration)
-        const videoInfo = await ytdl.getBasicInfo(url);
-        const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60); // Convert to minutes
-
-        // Fetch the transcript
-        
-        try {
-          const transcript = await getSubtitles({
-            videoID: videoId,
-            lang: 'en'
-          });
-
-          if (!transcript || transcript.length === 0) {
-            throw new Error('No English captions available for this video.');
-          }
-
-          // Combine all transcript items into a single string
-          const transcriptText = transcript.map(item => item.text).join(' ');
-
-          // Prepare the simple response format
-          const response = {
-              duration: duration,
-              title: videoInfo.videoDetails.title,
-              transcript: transcriptText
-          };
-
-          // Send the simplified transcript response
-          res.json(response);
-        } catch (transcriptError) {
-          console.error('Error fetching transcript:', transcriptError.message);
-          res.status(404).json({ message: 'No transcript found for this video.' });
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).json({ message: 'An error occurred while fetching the simple transcript.' });
-    }
-});
-
-// smart-transcript endpoint
-app.post('/simple-transcript', async (req, res) => {
   try {
       const { url } = req.body;
 
@@ -211,6 +165,67 @@ app.post('/simple-transcript', async (req, res) => {
       res.status(500).json({ message: 'An error occurred while fetching the simple transcript.' });
   }
 });
+
+
+// smart-transcript endpoint
+app.post('/smart-transcript', async (req, res) => {
+  try {
+    const { url } = req.body;
+    const videoId = ytdl.getURLVideoID(url);
+
+    // Check if transcript already exists in Firestore
+    const docRef = db.collection('transcripts').doc(videoId);
+    const doc = await docRef.get();
+
+    if (doc.exists) {
+      console.log(`Transcript found in Firebase for ${videoId}`);
+      return res.json(doc.data());
+    }
+
+    // Get video info
+    const videoInfo = await ytdl.getBasicInfo(url);
+    const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);  // Convert to minutes
+
+    // Fetch the transcript
+    try {
+      const transcript = await getSubtitles({ videoID: videoId, lang: 'en' });
+      if (!transcript || transcript.length === 0) {
+        throw new Error('No English captions available for this video.');
+      }
+
+      // Combine all transcript items into a single string
+      const transcriptText = transcript.map(item => item.text).join(' ');
+
+      // Store the chunks in Firestore
+      await docRef.set({
+        videoId,
+        title: videoInfo.videoDetails.title,
+        duration,
+        transcript: transcriptText,  // You can also store the full transcript here if needed
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(`Full transcript and chunks stored in Firebase for ${videoId}`);
+
+      // Return a response with the full transcript and chunk information
+      res.json({
+        videoId,
+        title: videoInfo.videoDetails.title,
+        duration,
+        transcript: transcriptText,
+        chunks: chunks.length,
+      });
+
+    } catch (transcriptError) {
+      console.error('Error fetching transcript:', transcriptError.message);
+      res.status(404).json({ message: 'No transcript found for this video.' });
+    }
+  } catch (error) {
+    console.error('Error fetching/storing transcript:', error);
+    res.status(500).json({ message: 'An error occurred while processing the transcript.' });
+  }
+});
+
 
 // smart-summary endpoint
 // Model URL mapping
