@@ -375,7 +375,7 @@ app.post('/smart-summary-firebase', async (req, res) => {
 
     res.json({ summary, fromCache: false });
   } catch (err) {
-    console.error('Error in /smart-summary:', err);
+    console.error('Error in /smart-summary-firebase:', err);
     res.status(500).json({ message: 'Error generating smart summary' });
   }
 });
