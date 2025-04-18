@@ -46,22 +46,30 @@ app.post('/transcript', async (req, res) => {
 
       // Extract video ID from URL
       const videoId = ytdl.getURLVideoID(url);
+      if (!videoId) {
+          return res.status(400).json({ message: 'Invalid YouTube URL' });
+      }
 
       // Get video info (e.g., title, author, etc.)
       const videoInfo = await ytdl.getBasicInfo(url);
+      if (!videoInfo || !videoInfo.videoDetails) {
+          return res.status(404).json({ message: 'Video not found' });
+      }
 
-      // Fetch available captions (subtitles) for the video
-      const captions = await ytdl.getCaptions(videoId);
+      // Fetch available captions (subtitles) from the video info
+      const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
 
-      if (!captions || captions.length === 0) {
+      if (!captionTracks || captionTracks.length === 0) {
           return res.status(404).json({ message: 'No captions available for this video.' });
       }
 
-      // If available, fetch the first available caption (or choose another language if needed)
-      const languageCode = captions[0].languageCode || 'en'; // You can change this to a preferred language if necessary
+      // Select the first available caption track (or choose another based on your needs)
+      const languageCode = captionTracks[0].languageCode;
+
+      // Fetch the transcript in the selected language
       const transcript = await getSubtitles({
-          videoID: videoId, // youtube video id
-          lang: languageCode // use the language code of the first available caption
+          videoID: videoId, // YouTube video ID
+          lang: languageCode // Use the language code of the first available caption
       });
 
       // Prepare the response in the desired format
@@ -83,11 +91,12 @@ app.post('/transcript', async (req, res) => {
                   author: videoInfo.videoDetails.author.name,
                   channel_id: videoInfo.videoDetails.channelId,
               },
-              language_code: captions.map(caption => ({
+              language_code: captionTracks.map(caption => ({
                   code: caption.languageCode,
-                  name: caption.languageName
+                  name: caption.name.simpleText
               })),
-              transcripts: captions.reduce((acc, caption) => {
+              transcripts: captionTracks.reduce((acc, caption) => {
+                  // Only retrieve transcripts for available languages
                   acc[caption.languageCode] = {
                       custom: transcript.map((item) => ({
                           start: item.start,
@@ -107,7 +116,6 @@ app.post('/transcript', async (req, res) => {
       res.status(500).json({ message: 'An error occurred while fetching the transcript.' });
   }
 });
-
 
 app.post('/simple-transcript', async (req, res) => {
     try {
