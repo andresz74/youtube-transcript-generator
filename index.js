@@ -220,8 +220,7 @@ app.post('/smart-transcript', async (req, res) => {
 const modelUrls = {
   chatgpt: process.env.CHATGPT_VERCEL_URL,
   deepseek: process.env.DEEPSEEK_VERCEL_URL,
-  // Add new models here, e.g.:
-  // myNewModel: process.env.MY_NEW_MODEL_URL,
+  anthropic: process.env.ANTHROPIC_VERCEL_URL,
 };
 
 app.post('/smart-summary', async (req, res) => {
@@ -360,8 +359,9 @@ app.post('/smart-summary-firebase', async (req, res) => {
     const response = await axios.post(modelUrl, {
       videoId  // Only send the video ID
     });
+    console.log('Response from model:', response.data);
 
-    const summary = response.data.choices?.[0]?.message?.content;
+    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
 
     if (summary) {
       console.log(`Summary stored in Firebase for ${videoId}`);
@@ -376,7 +376,7 @@ app.post('/smart-summary-firebase', async (req, res) => {
 
     res.json({ summary, fromCache: false });
   } catch (err) {
-    console.error('Error in /smart-summary:', err);
+    console.error('Error in /smart-summary-firebase:', err);
     res.status(500).json({ message: 'Error generating smart summary' });
   }
 });
