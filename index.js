@@ -206,7 +206,7 @@ app.post('/smart-transcript', async (req, res) => {
       // Combine all transcript items into a single string
       const transcriptText = transcript.map(item => item.text).join(' ');
 
-      // Store the chunks in Firestore
+      // Store the transcript in Firestore
       await docRef.set({
         videoId,
         title: videoInfo.videoDetails.title,
@@ -223,7 +223,6 @@ app.post('/smart-transcript', async (req, res) => {
         title: videoInfo.videoDetails.title,
         duration,
         transcript: transcriptText,
-        chunks: chunks.length,
       });
 
     } catch (transcriptError) {
