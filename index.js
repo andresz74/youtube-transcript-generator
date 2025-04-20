@@ -186,9 +186,19 @@ app.post('/smart-transcript', async (req, res) => {
     const videoInfo = await ytdl.getBasicInfo(url);
     const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);  // Convert to minutes
 
+    // Fetch available captions (subtitles) from the video info
+    const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
+
+    if (!captionTracks || captionTracks.length === 0) {
+        return res.status(404).json({ message: 'No captions available for this video.' });
+    }
+
+    // Select the first available caption track (you can choose based on your preference)
+    const languageCode = captionTracks[0].languageCode;
+
     // Fetch the transcript
     try {
-      const transcript = await getSubtitles({ videoID: videoId, lang: 'en' });
+      const transcript = await getSubtitles({ videoID: videoId, lang: languageCode });
       if (!transcript || transcript.length === 0) {
         throw new Error('No English captions available for this video.');
       }
