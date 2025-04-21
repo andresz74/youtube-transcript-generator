@@ -41,110 +41,140 @@ app.get('/debug', (req, res) => {
 
 // Existing transcript endpoint
 app.post('/transcript', async (req, res) => {
-    try {
-        const { url } = req.body;
+  try {
+      const { url } = req.body;
+       
+      // Check if the video is a YouTube Short
+       const isShort = url.includes('/shorts/');
+       console.log('isShort:', isShort);
 
-        // Extract video ID from URL
-        const videoId = ytdl.getURLVideoID(url);
+      // Extract video ID from URL
+      const videoId = ytdl.getURLVideoID(url);
+      if (!videoId) {
+          return res.status(400).json({ message: 'Invalid YouTube URL' });
+      }
 
-        // Get video info (e.g., title, author, etc.)
-        const videoInfo = await ytdl.getBasicInfo(url);
+      // Get video info (e.g., title, author, etc.)
+      const videoInfo = await ytdl.getBasicInfo(url);
+      if (!videoInfo || !videoInfo.videoDetails) {
+          return res.status(404).json({ message: 'Video not found' });
+      }
 
-        // Fetch the transcript
-        const transcript = await getSubtitles({
-            videoID: videoId, // youtube video id
-            lang: 'en' // default to English
-        });
+      // Fetch available captions (subtitles) from the video info
+      const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
+      console.log('Caption Tracks:', captionTracks);
+    
+      if (!captionTracks || captionTracks.length === 0) {
+          return res.status(404).json({ message: 'No captions available for this video.' });
+      }
 
-        // Prepare the response in the desired format
-        const response = {
-            code: 100000,
-            message: 'success',
-            data: {
-                videoId: videoId,
-                videoInfo: {
-                    name: videoInfo.videoDetails.title,
-                    thumbnailUrl: {
-                        hqdefault: videoInfo.videoDetails.thumbnails[0].url,
-                    },
-                    embedUrl: `https://www.youtube.com/embed/${videoId}`,
-                    duration: videoInfo.videoDetails.lengthSeconds,
-                    description: videoInfo.videoDetails.description,
-                    upload_date: videoInfo.videoDetails.publishDate,
-                    genre: videoInfo.videoDetails.category,
-                    author: videoInfo.videoDetails.author.name,
-                    channel_id: videoInfo.videoDetails.channelId,
+      // Select the first available caption track (or choose another based on your needs)
+      const languageCode = captionTracks[0].languageCode;
+
+      // Fetch the transcript in the selected language
+      const transcript = await getSubtitles({
+          videoID: videoId, // YouTube video ID
+          lang: languageCode // Use the language code of the first available caption
+      });
+
+      // Prepare the response in the desired format
+      const response = {
+        status: 'success',
+        status_code: 200,
+        code: 100000,
+        message: 'success',
+        data: {
+            videoId: videoId,
+            videoInfo: videoInfo,
+            videoInfoSummary: {
+                name: videoInfo.videoDetails.title,
+                thumbnailUrl: {
+                    hqdefault: videoInfo.videoDetails.thumbnails[0].url,
                 },
-                language_code: [
-                    {
-                        code: 'en_auto_auto',
-                        name: 'English (auto-generated)'
-                    }
-                ],
-                transcripts: {
-                    en_auto_auto: {
-                        custom: transcript.map((item) => ({
-                            start: item.start,
-                            end: item.start + item.dur,
-                            text: item.text
-                        }))
-                    }
-                }
-            }
-        };
+                embedUrl: `https://www.youtube.com/embed/${videoId}`,
+                duration: videoInfo.videoDetails.lengthSeconds,
+                description: videoInfo.videoDetails.description,
+                upload_date: videoInfo.videoDetails.publishDate,
+                genre: videoInfo.videoDetails.category,
+                author: videoInfo.videoDetails.author.name,
+                channel_id: videoInfo.videoDetails.channelId,
+            },
+            language_code: captionTracks.map(caption => ({
+                code: caption.languageCode,
+                name: caption.name.simpleText
+            })),
+            transcripts: captionTracks.reduce((acc, caption) => {
+                // Only retrieve transcripts for available languages
+                acc[caption.languageCode] = {
+                    custom: transcript.map((item) => ({
+                        start: item.start,
+                        end: item.start + item.dur,
+                        text: item.text
+                    }))
+                };
+                return acc;
+            }, {})
+        }
+      };
 
-        // Send response
-        res.json(response);
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).json({ message: 'An error occurred while fetching the transcript.' });
-    }
+      // Send response
+      res.json(response);
+  } catch (error) {
+      console.error('Error:', error);
+      res.status(500).json({ message: 'An error occurred while fetching the transcript.' });
+  }
 });
 
 app.post('/simple-transcript', async (req, res) => {
-    try {
-        const { url } = req.body;
+  try {
+      const { url } = req.body;
 
-        // Extract video ID from URL
-        const videoId = ytdl.getURLVideoID(url);
+      // Extract video ID from URL
+      const videoId = ytdl.getURLVideoID(url);
 
-        // Get video info (e.g., duration)
-        const videoInfo = await ytdl.getBasicInfo(url);
-        const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60); // Convert to minutes
+      // Get video info (e.g., duration)
+      const videoInfo = await ytdl.getBasicInfo(url);
+      const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60); // Convert to minutes
 
-        // Fetch the transcript
-        
-        try {
-          const transcript = await getSubtitles({
-            videoID: videoId,
-            lang: 'en'
-          });
+      // Fetch available captions (subtitles) from the video info
+      const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
+      console.log('Caption Tracks:', captionTracks);
 
-          if (!transcript || transcript.length === 0) {
-            throw new Error('No English captions available for this video.');
-          }
+      if (!captionTracks || captionTracks.length === 0) {
+          return res.status(404).json({ message: 'No captions available for this video.' });
+      }
 
-          // Combine all transcript items into a single string
-          const transcriptText = transcript.map(item => item.text).join(' ');
+      // Select the first available caption track (you can choose based on your preference)
+      const languageCode = captionTracks[0].languageCode;
 
-          // Prepare the simple response format
-          const response = {
-              duration: duration,
-              title: videoInfo.videoDetails.title,
-              transcript: transcriptText
-          };
+      // Fetch the transcript in the selected language
+      const transcript = await getSubtitles({
+          videoID: videoId,
+          lang: languageCode // Use the language code of the first available caption
+      });
 
-          // Send the simplified transcript response
-          res.json(response);
-        } catch (transcriptError) {
-          console.error('Error fetching transcript:', transcriptError.message);
-          res.status(404).json({ message: 'No transcript found for this video.' });
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).json({ message: 'An error occurred while fetching the simple transcript.' });
-    }
+      if (!transcript || transcript.length === 0) {
+          throw new Error(`No captions available in the selected language (${languageCode}).`);
+      }
+
+      // Combine all transcript items into a single string
+      const transcriptText = transcript.map(item => item.text).join(' ');
+
+      // Prepare the simple response format
+      const response = {
+          duration: duration,
+          title: videoInfo.videoDetails.title,
+          transcript: transcriptText
+      };
+
+      // Send the simplified transcript response
+      res.json(response);
+  } catch (error) {
+      console.error('Error:', error);
+      res.status(500).json({ message: 'An error occurred while fetching the simple transcript.' });
+  }
 });
+
 
 // smart-transcript endpoint
 app.post('/smart-transcript', async (req, res) => {
@@ -165,9 +195,20 @@ app.post('/smart-transcript', async (req, res) => {
     const videoInfo = await ytdl.getBasicInfo(url);
     const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);  // Convert to minutes
 
+    // Fetch available captions (subtitles) from the video info
+    const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
+    console.log('Caption Tracks:', captionTracks);
+
+    if (!captionTracks || captionTracks.length === 0) {
+        return res.status(404).json({ message: 'No captions available for this video.' });
+    }
+
+    // Select the first available caption track (you can choose based on your preference)
+    const languageCode = captionTracks[0].languageCode;
+
     // Fetch the transcript
     try {
-      const transcript = await getSubtitles({ videoID: videoId, lang: 'en' });
+      const transcript = await getSubtitles({ videoID: videoId, lang: languageCode });
       if (!transcript || transcript.length === 0) {
         throw new Error('No English captions available for this video.');
       }
@@ -175,21 +216,12 @@ app.post('/smart-transcript', async (req, res) => {
       // Combine all transcript items into a single string
       const transcriptText = transcript.map(item => item.text).join(' ');
 
-      // Chunk the transcript into smaller pieces (e.g., by character limit)
-      const chunkSize = 5000;  // Define a reasonable chunk size (5000 characters in this example)
-      const chunks = [];
-
-      for (let i = 0; i < transcriptText.length; i += chunkSize) {
-        chunks.push(transcriptText.slice(i, i + chunkSize));
-      }
-
-      // Store the chunks in Firestore
+      // Store the transcript in Firestore
       await docRef.set({
         videoId,
         title: videoInfo.videoDetails.title,
         duration,
         transcript: transcriptText,  // You can also store the full transcript here if needed
-        chunks,  // Store the chunks separately
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
@@ -201,7 +233,6 @@ app.post('/smart-transcript', async (req, res) => {
         title: videoInfo.videoDetails.title,
         duration,
         transcript: transcriptText,
-        chunks: chunks.length,
       });
 
     } catch (transcriptError) {
