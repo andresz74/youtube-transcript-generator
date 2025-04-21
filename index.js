@@ -43,6 +43,10 @@ app.get('/debug', (req, res) => {
 app.post('/transcript', async (req, res) => {
   try {
       const { url } = req.body;
+       
+      // Check if the video is a YouTube Short
+       const isShort = url.includes('/shorts/');
+       console.log('isShort:', isShort);
 
       // Extract video ID from URL
       const videoId = ytdl.getURLVideoID(url);
@@ -58,10 +62,8 @@ app.post('/transcript', async (req, res) => {
 
       // Fetch available captions (subtitles) from the video info
       const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
-      const translationLanguages = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.translationLanguages;
       console.log('Caption Tracks:', captionTracks);
-      console.log('Translation Languages:', translationLanguages);
-
+    
       if (!captionTracks || captionTracks.length === 0) {
           return res.status(404).json({ message: 'No captions available for this video.' });
       }
@@ -195,6 +197,7 @@ app.post('/smart-transcript', async (req, res) => {
 
     // Fetch available captions (subtitles) from the video info
     const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
+    console.log('Caption Tracks:', captionTracks);
 
     if (!captionTracks || captionTracks.length === 0) {
         return res.status(404).json({ message: 'No captions available for this video.' });
