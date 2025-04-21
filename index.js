@@ -3,6 +3,7 @@ require('dotenv').config();
 const axios = require('axios');
 const express = require('express');
 const cors = require('cors');
+const logger = require('./logger');
 const ytdl = require('ytdl-core');
 const getSubtitles = require('youtube-captions-scraper').getSubtitles;
 
@@ -25,6 +26,11 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use((req, res, next) => {
+  // Log every request with relevant details
+  logger.info(`Endpoint Hit: ${req.method} ${req.originalUrl} - ${new Date().toISOString()}`);
+  next();
+});
 
 // Health check route
 app.get('/health', (req, res) => {
@@ -417,4 +423,7 @@ app.post('/smart-summary-firebase', async (req, res) => {
 const port = process.env.PORT || 3000;
 app.listen(port, '0.0.0.0', () => {
     console.log(`Server is running on port ${port}`);
+    logger.info(`Server is running on port ${port}`);
+    console.log('Server started at:', new Date().toISOString());
+    logger.info('Server started at:', new Date().toISOString());
 });
