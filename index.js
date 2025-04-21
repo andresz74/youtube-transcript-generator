@@ -77,39 +77,42 @@ app.post('/transcript', async (req, res) => {
 
       // Prepare the response in the desired format
       const response = {
-          code: 100000,
-          message: 'success',
-          data: {
-              videoId: videoId,
-              videoInfo: {
-                  name: videoInfo.videoDetails.title,
-                  thumbnailUrl: {
-                      hqdefault: videoInfo.videoDetails.thumbnails[0].url,
-                  },
-                  embedUrl: `https://www.youtube.com/embed/${videoId}`,
-                  duration: videoInfo.videoDetails.lengthSeconds,
-                  description: videoInfo.videoDetails.description,
-                  upload_date: videoInfo.videoDetails.publishDate,
-                  genre: videoInfo.videoDetails.category,
-                  author: videoInfo.videoDetails.author.name,
-                  channel_id: videoInfo.videoDetails.channelId,
-              },
-              language_code: captionTracks.map(caption => ({
-                  code: caption.languageCode,
-                  name: caption.name.simpleText
-              })),
-              transcripts: captionTracks.reduce((acc, caption) => {
-                  // Only retrieve transcripts for available languages
-                  acc[caption.languageCode] = {
-                      custom: transcript.map((item) => ({
-                          start: item.start,
-                          end: item.start + item.dur,
-                          text: item.text
-                      }))
-                  };
-                  return acc;
-              }, {})
-          }
+        status: 'success',
+        status_code: 200,
+        code: 100000,
+        message: 'success',
+        data: {
+            videoId: videoId,
+            videoInfo: videoInfo,
+            videoInfoSummary: {
+                name: videoInfo.videoDetails.title,
+                thumbnailUrl: {
+                    hqdefault: videoInfo.videoDetails.thumbnails[0].url,
+                },
+                embedUrl: `https://www.youtube.com/embed/${videoId}`,
+                duration: videoInfo.videoDetails.lengthSeconds,
+                description: videoInfo.videoDetails.description,
+                upload_date: videoInfo.videoDetails.publishDate,
+                genre: videoInfo.videoDetails.category,
+                author: videoInfo.videoDetails.author.name,
+                channel_id: videoInfo.videoDetails.channelId,
+            },
+            language_code: captionTracks.map(caption => ({
+                code: caption.languageCode,
+                name: caption.name.simpleText
+            })),
+            transcripts: captionTracks.reduce((acc, caption) => {
+                // Only retrieve transcripts for available languages
+                acc[caption.languageCode] = {
+                    custom: transcript.map((item) => ({
+                        start: item.start,
+                        end: item.start + item.dur,
+                        text: item.text
+                    }))
+                };
+                return acc;
+            }, {})
+        }
       };
 
       // Send response
@@ -133,6 +136,7 @@ app.post('/simple-transcript', async (req, res) => {
 
       // Fetch available captions (subtitles) from the video info
       const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
+      console.log('Caption Tracks:', captionTracks);
 
       if (!captionTracks || captionTracks.length === 0) {
           return res.status(404).json({ message: 'No captions available for this video.' });
