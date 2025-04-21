@@ -1,13 +1,23 @@
 const winston = require('winston');
+const { transports } = require('winston');
+const { LogglyTransport } = require('winston-loggly-bulk'); // optional, if you need cloud logging
 
-// Create a logger with a simple configuration
+// Create a logger with a configuration for the system journal
 const logger = winston.createLogger({
-  level: 'info',  // Log level (adjust as needed)
+  level: 'info',  // Adjust log level
   format: winston.format.simple(),
   transports: [
-    new winston.transports.Console(),  // Logs to the console
-    new winston.transports.File({ filename: 'logs/endpoint.log' })  // Logs to a file (optional)
-  ]
+    new transports.Console(),  // Log to console
+    new transports.File({ filename: 'logs/endpoint.log' }),  // Optionally, log to a file
+    new transports.Stream({
+      stream: process.stdout,  // Optionally log to stdout (useful in Cockpit)
+    }),
+    new transports.Http({
+      host: 'localhost',
+      port: 514,  // For syslog integration (optional)
+      path: '/logs',  // Optional path if using HTTP endpoint for logs
+    }),
+  ],
 });
 
 module.exports = logger;

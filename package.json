@@ -17,6 +17,7 @@
     "express": "^4.21.0",
     "firebase-admin": "^13.2.0",
     "winston": "^3.17.0",
+    "winston-transport": "^4.9.0",
     "youtube-captions-scraper": "^2.0.3",
     "ytdl-core": "^4.11.5"
   },
