@@ -1,6 +1,5 @@
 const winston = require('winston');
 const { transports } = require('winston');
-const { LogglyTransport } = require('winston-loggly-bulk'); // optional, if you need cloud logging
 
 // Create a logger with a configuration for the system journal
 const logger = winston.createLogger({
