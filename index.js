@@ -231,7 +231,7 @@ app.post('/smart-transcript', async (req, res) => {
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      console.log(`Full transcript and chunks stored in Firebase for ${videoId}`);
+      console.log(`Full transcript stored in Firebase for ${videoId}`);
 
       // Return a response with the full transcript and chunk information
       res.json({
