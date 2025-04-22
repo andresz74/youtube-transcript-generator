@@ -1,21 +1,14 @@
 const winston = require('winston');
-const { transports } = require('winston');
 
-// Create a logger with a configuration for the system journal
 const logger = winston.createLogger({
-  level: 'info',  // Adjust log level
+  level: 'info',  // Adjust log level as needed
   format: winston.format.simple(),
   transports: [
-    new transports.Console(),  // Log to console
-    new transports.File({ filename: 'logs/endpoint.log' }),  // Optionally, log to a file
-    new transports.Stream({
-      stream: process.stdout,  // Optionally log to stdout (useful in Cockpit)
+    new winston.transports.Console(),  // Log to the console (stdout)
+    new winston.transports.Stream({
+      stream: process.stdout,  // Ensures logs are written to stdout, which systemd can capture
     }),
-    new transports.Http({
-      host: 'localhost',
-      port: 514,  // For syslog integration (optional)
-      path: '/logs',  // Optional path if using HTTP endpoint for logs
-    }),
+    new winston.transports.File({ filename: 'logs/endpoint.log' })  // Optional file logging
   ],
 });
 
