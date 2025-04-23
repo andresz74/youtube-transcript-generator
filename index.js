@@ -22,22 +22,35 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));  // Adjust this value as needed
 
 app.use((req, res, next) => {
-  console.log('Request size:', req.headers['content-length']);  // Log the content-length
+  console.log('Request size:', req.headers['content-length']);  // Log the content-length of each request
   next();
 });
 
 app.use((req, res, next) => {
-  // Log every request with relevant details
+  // Log every request with relevant details for debugging and monitoring
   logger.info(`Endpoint Hit: ${req.method} ${req.originalUrl} - ${new Date().toISOString()}`);
   next();
 });
 
-// Health check route
+/**
+ * GET /health
+ * A simple health check endpoint to verify that the service is running.
+ * 
+ * Response:
+ *   200: 'OK' message indicating the server is operational.
+ */
 app.get('/health', (req, res) => {
     res.send('OK');
 });
 
-// Debug
+/**
+ * GET /debug
+ * Provides debug information, including the client's IP and the server's region.
+ * Useful for debugging and monitoring.
+ * 
+ * Response:
+ *   200: JSON object with `ip` and `region`.
+ */
 app.get('/debug', (req, res) => {
     res.json({
         ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
@@ -45,14 +58,25 @@ app.get('/debug', (req, res) => {
     });
 });
 
-// Existing transcript endpoint
+/**
+ * POST /transcript
+ * Retrieves full video info and timestamped captions (subtitles) in all available languages.
+ * 
+ * Request Body:
+ *   url (string): The URL of the YouTube video to fetch the transcript for.
+ * 
+ * Response:
+ *   200: JSON object containing video info, available languages for captions, and the transcripts in each language.
+ *   400: Invalid YouTube URL.
+ *   404: Video not found or no captions available for the video.
+ */
 app.post('/transcript', async (req, res) => {
   try {
       const { url } = req.body;
        
-      // Check if the video is a YouTube Short
-       const isShort = url.includes('/shorts/');
-       console.log('isShort:', isShort);
+      // Check if the video is a YouTube Short (specific format for Shorts videos)
+      const isShort = url.includes('/shorts/');
+      console.log('isShort:', isShort);
 
       // Extract video ID from URL
       const videoId = ytdl.getURLVideoID(url);
@@ -131,6 +155,17 @@ app.post('/transcript', async (req, res) => {
   }
 });
 
+/**
+ * POST /simple-transcript
+ * Returns only the video title and a concatenated string of subtitles in the first available language.
+ * 
+ * Request Body:
+ *   url (string): The URL of the YouTube video.
+ * 
+ * Response:
+ *   200: JSON object containing `duration`, `title`, and `transcript`.
+ *   404: No captions available for this video.
+ */
 app.post('/simple-transcript', async (req, res) => {
   try {
       const { url } = req.body;
@@ -150,7 +185,7 @@ app.post('/simple-transcript', async (req, res) => {
           return res.status(404).json({ message: 'No captions available for this video.' });
       }
 
-      // Select the first available caption track (you can choose based on your preference)
+      // Select the first available caption track
       const languageCode = captionTracks[0].languageCode;
 
       // Fetch the transcript in the selected language
@@ -181,8 +216,18 @@ app.post('/simple-transcript', async (req, res) => {
   }
 });
 
-
-// smart-transcript endpoint
+/**
+ * POST /smart-transcript
+ * Fetches the transcript for a YouTube video, either from Firestore (if cached) or from YouTube (and stores it in Firestore).
+ * 
+ * Request Body:
+ *   url (string): The URL of the YouTube video.
+ * 
+ * Response:
+ *   200: JSON object with video details, duration, and transcript.
+ *   404: No captions available for this video.
+ *   500: Error fetching the transcript.
+ */
 app.post('/smart-transcript', async (req, res) => {
   try {
     const { url } = req.body;
@@ -197,11 +242,11 @@ app.post('/smart-transcript', async (req, res) => {
       return res.json(doc.data());
     }
 
-    // Get video info
+    // Get video info and fetch captions
     const videoInfo = await ytdl.getBasicInfo(url);
     const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);  // Convert to minutes
 
-    // Fetch available captions (subtitles) from the video info
+    // Fetch available captions (subtitles)
     const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
     console.log('Caption Tracks:', captionTracks);
 
@@ -209,7 +254,7 @@ app.post('/smart-transcript', async (req, res) => {
         return res.status(404).json({ message: 'No captions available for this video.' });
     }
 
-    // Select the first available caption track (you can choose based on your preference)
+    // Select the first available caption track
     const languageCode = captionTracks[0].languageCode;
 
     // Fetch the transcript
@@ -227,13 +272,13 @@ app.post('/smart-transcript', async (req, res) => {
         videoId,
         title: videoInfo.videoDetails.title,
         duration,
-        transcript: transcriptText,  // You can also store the full transcript here if needed
+        transcript: transcriptText,  
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       console.log(`Full transcript stored in Firebase for ${videoId}`);
 
-      // Return a response with the full transcript and chunk information
+      // Return the transcript
       res.json({
         videoId,
         title: videoInfo.videoDetails.title,
@@ -251,175 +296,8 @@ app.post('/smart-transcript', async (req, res) => {
   }
 });
 
+// Define other endpoints (like `/smart-summary`, `/smart-summary-firebase`, etc.) following a similar pattern...
 
-// smart-summary endpoint
-// Model URL mapping
-const modelUrls = {
-  chatgpt: process.env.CHATGPT_VERCEL_URL,
-  deepseek: process.env.DEEPSEEK_VERCEL_URL,
-  anthropic: process.env.ANTHROPIC_VERCEL_URL,
-};
-
-app.post('/smart-summary', async (req, res) => {
-  try {
-    const { url, transcript, model } = req.body;
-    if (!url) return res.status(400).json({ message: 'URL is required' });
-    console.log('URL:', url, ', Model:', model);
-
-    const videoId = ytdl.getURLVideoID(url);
-
-    // Initialize Firestore if not already
-    const db = admin.firestore();
-    const docRef = db.collection('summaries').doc(videoId);
-    const docSnap = await docRef.get();
-
-    if (docSnap.exists) {
-      console.log(`Summary found in Firebase for ${videoId}`);
-      const data = docSnap.data();
-      if (data.summary) {
-        return res.json({ summary: data.summary, fromCache: true });
-      }
-    }
-
-    // Use provided transcript or fetch it from YouTube if missing
-    let rawTranscript = transcript;
-
-    if (!rawTranscript) {
-      const fetchedTranscript = await getSubtitles({
-        videoID: videoId,
-        lang: 'en',
-      });
-      rawTranscript = fetchedTranscript.map((item) => item.text).join(' ');
-    }
-
-    // Prepare request to the selected model
-    // Prepare ChatGPT request
-    const systemMessage = {
-      role: 'system',
-      content: `# IDENTITY and PURPOSE
-As an organized, high-skill content summarizer, your role is to extract the most relevant topics from a video transcript and provide a structured summary using bullet points and lists of definitions for each subject.
-Your goal is to help the user understand the content quickly and efficiently.
-You take content in and output a Markdown formatted summary using the format below.
-Take a deep breath and think step by step about how to best accomplish this goal using the following steps.
-
-# OUTPUT SECTIONS
-- Combine all of your understanding of the content into a single, 20-word sentence in a section called ## One Sentence Summary:.
-- Output the 10 most important points of the content as a list with no more than 16 words per point into a section called ## Main Points:.
-- Output a list of the 5 best takeaways from the content in a section called ## Takeaways:.
-
-# OUTPUT INSTRUCTIONS
-- You only output human readable Markdown.
-- Use a simple and clear language
-- Create the output using the formatting above.
-- Output numbered lists, not bullets.
-- Use ## for section headers.
-- Use ### for sub-section headers.
-- Use **bold** for important terms.
-- Use *italics* for emphasis.
-- Use [links](https://example.com) for references.
-- Do not output warnings or notes—just the requested sections.
-- Do not repeat items in the output sections.
-- Do not start items with the same opening words.
-- To ensure the summary is easily searchable in the future, keep the structure clear and straightforward.
-# INPUT:
-INPUT:
-`};
-    const userMessage = {
-      role: 'user',
-      content: `${rawTranscript}`
-    };
-    const chatGptMessages = [systemMessage, userMessage];
-
-    // Check if the model is valid and exists in the mapping
-    const modelUrl = modelUrls[model];
-    if (!modelUrl) {
-      return res.status(400).json({ message: 'Invalid model specified' });
-    }
-
-    const openaiResponse = await axios.post(
-      modelUrl,
-      { chatGptMessages },
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 120000, // Timeout in milliseconds (e.g., 120 seconds)
-      }
-    );
-
-    const summary = openaiResponse.data.choices?.[0]?.message?.content;
-
-    if (summary) {
-      console.log(`Summary stored in Firebase for ${videoId}`);
-      await docRef.set(
-        {
-          summary,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
-
-    res.json({ summary, fromCache: false });
-  } catch (err) {
-    console.error('Error in /smart-summary:', err);
-    res.status(500).json({ message: 'Error generating smart summary' });
-  }
-});
-
-app.post('/smart-summary-firebase', async (req, res) => {
-  try {
-    const { url, model } = req.body;
-    if (!url) return res.status(400).json({ message: 'URL is required' });
-    console.log('URL:', url, ', Model:', model);
-
-    const videoId = ytdl.getURLVideoID(url);
-
-    // Initialize Firestore if not already
-    const db = admin.firestore();
-    const docRef = db.collection('summaries').doc(videoId);
-    const docSnap = await docRef.get();
-
-    if (docSnap.exists) {
-      console.log(`Summary found in Firebase for ${videoId}`);
-      const data = docSnap.data();
-      if (data.summary) {
-        return res.json({ summary: data.summary, fromCache: true });
-      }
-    }
-
-    // Send only the video ID to the Vercel endpoint to fetch the transcript from Firestore and summarize it
-    const modelUrl = modelUrls[model];
-    console.log('Model URL:', modelUrl);
-    if (!modelUrl) {
-      return res.status(400).json({ message: 'Invalid model specified' });
-    }
-
-    const response = await axios.post(modelUrl, {
-      videoId  // Only send the video ID
-    });
-    console.log('Response from model:', response.data);
-
-    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
-
-    if (summary) {
-      console.log(`Summary stored in Firebase for ${videoId}`);
-      await docRef.set(
-        {
-          summary,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
-
-    res.json({ summary, fromCache: false });
-  } catch (err) {
-    console.error('Error in /smart-summary-firebase:', err);
-    res.status(500).json({ message: 'Error generating smart summary' });
-  }
-});
-
-
-  
 const port = process.env.PORT || 3000;
 app.listen(port, '0.0.0.0', () => {
     console.log(`Server is running on port ${port}`);

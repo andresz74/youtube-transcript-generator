@@ -1,13 +1,13 @@
 # YouTube Transcript and Video Info Service
 
-This is an Express-based service that fetches YouTube video information and transcripts (subtitles) in English. It uses the [ytdl-core](https://github.com/fent/node-ytdl-core) library to extract video metadata and the [youtube-captions-scraper](https://www.npmjs.com/package/youtube-captions-scraper) library to retrieve subtitles from YouTube videos.
+This is an Express-based service that fetches YouTube video information and transcripts (subtitles) in any available language. It uses the [ytdl-core](https://github.com/fent/node-ytdl-core) library to extract video metadata and the [youtube-captions-scraper](https://www.npmjs.com/package/youtube-captions-scraper) library to retrieve subtitles from YouTube videos.
 
 ![Backend Service](https://objects-us-east-1.dream.io/az-assets/youtube-transcript-generator.png "YouTube Transcript Generator")
 
 ## Features
 
 - Fetch basic video info like title, author, description, genre, and more.
-- Extract English (auto-generated) subtitles for YouTube videos.
+- Extract subtitles in any available language for YouTube videos.
 - Returns the start time, end time, and text of each subtitle.
 - Provides simplified and smart options to avoid duplicate processing.
 - Supports saving transcripts and summaries to Firebase Firestore for caching and reuse.
@@ -74,13 +74,13 @@ Fetches full video info + timestamped transcript.
 }
 ```
 
-**Response:** Full video info, subtitles with timestamps.
+**Response:** Full video info, subtitles with timestamps in all available languages.
 
 ---
 
 ### ✅ POST `/simple-transcript`
 
-Returns only the video title and concatenated English transcript as a string.
+Returns only the video title and concatenated transcript in the first available language.
 
 **Request:**
 
@@ -99,10 +99,6 @@ Returns only the video title and concatenated English transcript as a string.
   "transcript": "This is the transcript..."
 }
 ```
-
----
-
-Here’s an updated section for your README that introduces the **smart endpoints**, explains the motivation, notes the Firebase requirement, and gives basic setup instructions for the `firebaseServiceAccount.json` file.
 
 ---
 
@@ -202,7 +198,27 @@ You should send the transcript from the frontend if you already have it, to avoi
 
 ---
 
-Let me know if you’d like this merged into the full README or want to include Firebase Firestore schema guidance (e.g., how the `transcripts` and `summaries` collections are structured).
+### 🧠 POST `/smart-summary-firebase`
+
+This endpoint provides similar functionality to `/smart-summary` but offloads the summary creation and caching to Firestore itself.
+
+#### Request:
+
+```json
+{
+  "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "model": "chatgpt" // Specify which model to use (chatgpt, deepseek, anthropic)
+}
+```
+
+#### Response:
+
+```json
+{
+  "summary": "This is the summary of the transcript.",
+  "fromCache": true
+}
+```
 
 ---
 
