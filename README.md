@@ -99,6 +99,50 @@ Returns only the video title and concatenated transcript in the first available 
   "transcript": "This is the transcript..."
 }
 ```
+---
+
+### ✅ POST `/simple-transcript-v2`  
+
+Returns the video title, duration, and concatenated transcript in a **user-specified language** (or falls back to English/first available language). Also includes a list of available languages if multiple exist.
+
+**Request:**
+```json
+{
+  "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "lang": "es" // Optional: language code (e.g., "es" for Spanish)
+}
+```
+
+**Response:**
+```json
+{
+  "duration": 14,
+  "title": "Video Title",
+  "transcript": "Transcript text in the requested language...",
+  "languages": [ // Only included if multiple languages available
+    { "name": "English", "code": "en" },
+    { "name": "Spanish", "code": "es" }
+  ]
+}
+```
+
+**Behavior:**
+- If `lang` is specified, returns the transcript in that language (or errors if unavailable).
+- If no `lang` is provided, prioritizes English (non-auto-generated) or falls back to the first available language.
+- Includes `languages` array in the response when multiple subtitle tracks exist.
+
+---
+
+### 💡 Smart Caching with Firebase  
+[Rest of the existing content remains unchanged...]
+
+---
+
+### Why Update?
+The new `/simple-transcript-v2` endpoint improves upon `/simple-transcript` by:
+1. Supporting **explicit language selection** via `lang` parameter.
+2. Providing **transparency** about available languages.
+3. Maintaining backward compatibility with the original response format when no language is specified.
 
 ---
 
