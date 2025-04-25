@@ -261,7 +261,7 @@ app.post('/smart-transcript', async (req, res) => {
     // Ensure player_response and captions are available
     const playerResponse = videoInfo.player_response;
     if (!playerResponse || !playerResponse.captions || !playerResponse.captions.playerCaptionsTracklistRenderer) {
-      return res.status(404).json({ status: 404, message: 'No captions available for this video.' });
+      return res.status(404).json({ message: 'No captions available for this video.' });
     }
 
 
