@@ -87,7 +87,7 @@ app.post('/transcript', async (req, res) => {
       // Get video info (e.g., title, author, etc.)
       const videoInfo = await ytdl.getBasicInfo(url);
       if (!videoInfo || !videoInfo.videoDetails) {
-          return res.status(404).json({ message: 'Video not found' });
+          return res.status(404).json({ status: 404, message: 'Video not found' });
       }
 
       // Log the video info to check its structure
