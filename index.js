@@ -87,7 +87,16 @@ app.post('/transcript', async (req, res) => {
       // Get video info (e.g., title, author, etc.)
       const videoInfo = await ytdl.getBasicInfo(url);
       if (!videoInfo || !videoInfo.videoDetails) {
-          return res.status(404).json({ message: 'Video not found' });
+          return res.status(404).json({ status: 404, message: 'Video not found' });
+      }
+
+      // Log the video info to check its structure
+      console.log('Video Info:', videoInfo);
+
+      // Ensure player_response and captions are available
+      const playerResponse = videoInfo.player_response;
+      if (!playerResponse || !playerResponse.captions || !playerResponse.captions.playerCaptionsTracklistRenderer) {
+        return res.status(404).json({ message: 'No captions available for this video.', videoInfo });
       }
 
       // Fetch available captions (subtitles) from the video info
@@ -245,6 +254,16 @@ app.post('/smart-transcript', async (req, res) => {
     // Get video info and fetch captions
     const videoInfo = await ytdl.getBasicInfo(url);
     const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);  // Convert to minutes
+
+    // Log the video info to check its structure
+    console.log('Video Info:', videoInfo);
+
+    // Ensure player_response and captions are available
+    const playerResponse = videoInfo.player_response;
+    if (!playerResponse || !playerResponse.captions || !playerResponse.captions.playerCaptionsTracklistRenderer) {
+      return res.status(404).json({ message: 'No captions available for this video.' });
+    }
+
 
     // Fetch available captions (subtitles)
     const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
