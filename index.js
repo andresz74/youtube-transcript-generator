@@ -246,6 +246,16 @@ app.post('/smart-transcript', async (req, res) => {
     const videoInfo = await ytdl.getBasicInfo(url);
     const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);  // Convert to minutes
 
+    // Log the video info to check its structure
+    console.log('Video Info:', videoInfo);
+
+    // Ensure player_response and captions are available
+    const playerResponse = videoInfo.player_response;
+    if (!playerResponse || !playerResponse.captions || !playerResponse.captions.playerCaptionsTracklistRenderer) {
+      return res.status(404).json({ message: 'No captions available for this video.' });
+    }
+
+
     // Fetch available captions (subtitles)
     const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
     console.log('Caption Tracks:', captionTracks);
