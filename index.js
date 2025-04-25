@@ -227,7 +227,7 @@ app.post('/simple-transcript', async (req, res) => {
 
 app.post('/simple-transcript-test', async (req, res) => {
   try {
-      const { url } = req.body;
+      const { url, lang } = req.body;
 
       // Extract video ID from URL
       const videoId = ytdl.getURLVideoID(url);
@@ -243,7 +243,33 @@ app.post('/simple-transcript-test', async (req, res) => {
       if (!captionTracks || captionTracks.length === 0) {
           return res.status(404).json({ message: 'No captions available for this video.' });
       }
-
+      if (lang) {
+          // Check if the requested language is available
+          const langTrack = captionTracks.find(track => track.languageCode === lang);
+          if (!langTrack) {
+              return res.status(404).json({ message: `No captions available in the requested language (${lang}).` });
+          } else {
+            // Fetch the transcript in the requested language
+            const transcript = await getSubtitles({
+                videoID: videoId,
+                lang: lang // Use the requested language code
+            });
+            if (!transcript || transcript.length === 0) {
+                throw new Error(`No captions available in the requested language (${lang}).`);
+            }
+            // Combine all transcript items into a single string
+            const transcriptText = transcript.map(item => item.text).join(' ');
+            // Prepare the simple response format
+            const response = {
+                duration: duration,
+                title: videoInfo.videoDetails.title,
+                transcript: transcriptText
+            };
+            // Send the simplified transcript response
+            res.json(response);
+            return;
+          }
+      }
       // Create an array to store languages
       const languages = captionTracks.map(track => ({
           name: track.name.simpleText, 
