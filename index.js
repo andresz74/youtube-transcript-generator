@@ -228,6 +228,10 @@ app.post('/simple-transcript', async (req, res) => {
 app.post('/simple-transcript-test', async (req, res) => {
   try {
       const { url, lang } = req.body;
+      console.log('URL:', url, ', Language:', lang);
+      // Check if the video is a YouTube Short (specific format for Shorts videos)
+      const isShort = url.includes('/shorts/');
+      console.log('isShort:', isShort);
 
       // Extract video ID from URL
       const videoId = ytdl.getURLVideoID(url);
