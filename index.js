@@ -238,7 +238,6 @@ app.post('/simple-transcript-test', async (req, res) => {
 
       // Fetch available captions (subtitles) from the video info
       const captionTracks = videoInfo.player_response.captions.playerCaptionsTracklistRenderer.captionTracks;
-      console.log('Caption Tracks:', captionTracks);
 
       if (!captionTracks || captionTracks.length === 0) {
           return res.status(404).json({ message: 'No captions available for this video.' });
