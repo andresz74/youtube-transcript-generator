@@ -96,7 +96,7 @@ app.post('/transcript', async (req, res) => {
       // Ensure player_response and captions are available
       const playerResponse = videoInfo.player_response;
       if (!playerResponse || !playerResponse.captions || !playerResponse.captions.playerCaptionsTracklistRenderer) {
-        return res.status(404).json({ message: 'No captions available for this video.' });
+        return res.status(404).json({ message: 'No captions available for this video.', videoInfo });
       }
 
       // Fetch available captions (subtitles) from the video info
