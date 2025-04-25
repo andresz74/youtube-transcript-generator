@@ -225,7 +225,7 @@ app.post('/simple-transcript', async (req, res) => {
   }
 });
 
-app.post('/simple-transcript-test', async (req, res) => {
+app.post('/simple-transcript-v2', async (req, res) => {
   try {
       const { url, lang } = req.body;
       console.log('URL:', url, ', Language:', lang);
