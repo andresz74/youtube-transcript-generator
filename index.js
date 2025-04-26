@@ -266,7 +266,12 @@ app.post('/simple-transcript-v2', async (req, res) => {
             const response = {
                 duration: duration,
                 title: videoInfo.videoDetails.title,
-                transcript: transcriptText
+                transcript: transcriptText,
+                videoInfoSummary: {
+                  thumbnailUrl: {
+                    hqdefault: videoInfo.videoDetails.thumbnails[0].url,
+                },
+                }
             };
             // Send the simplified transcript response
             res.json(response);
