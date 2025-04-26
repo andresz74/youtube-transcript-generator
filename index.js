@@ -270,7 +270,7 @@ app.post('/simple-transcript-v2', async (req, res) => {
                 videoInfoSummary: {
                   thumbnailUrl: {
                     hqdefault: videoInfo.videoDetails.thumbnails[0].url,
-                },
+                  },
                 }
             };
             // Send the simplified transcript response
@@ -324,7 +324,12 @@ app.post('/simple-transcript-v2', async (req, res) => {
           duration: duration,
           title: videoInfo.videoDetails.title,
           transcript: transcriptText,
-          languages: languages.length > 1 ? languages : undefined // Only include if more than one language
+          languages: languages.length > 1 ? languages : undefined, // Only include if more than one language
+          videoInfoSummary: {
+            thumbnailUrl: {
+              hqdefault: videoInfo.videoDetails.thumbnails[0].url,
+            },
+          }
       };
 
       // Send the simplified transcript response with languages if more than one
