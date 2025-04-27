@@ -272,6 +272,8 @@ app.post('/simple-transcript-v2', async (req, res) => {
                   description: videoInfo.videoDetails.description,
                   embed: videoInfo.videoDetails.embed,
                   thumbnails: videoInfo.videoDetails.thumbnails,
+                  viewCount: videoInfo.videoDetails.viewCount,
+                  publishDate: videoInfo.videoDetails.publishDate,
                   video_url: videoInfo.videoDetails.video_url,
                 }
             };
@@ -332,6 +334,8 @@ app.post('/simple-transcript-v2', async (req, res) => {
             description: videoInfo.videoDetails.description,
             embed: videoInfo.videoDetails.embed,
             thumbnails: videoInfo.videoDetails.thumbnails,
+            viewCount: videoInfo.videoDetails.viewCount,
+            publishDate: videoInfo.videoDetails.publishDate,
             video_url: videoInfo.videoDetails.video_url,
           }
       };
