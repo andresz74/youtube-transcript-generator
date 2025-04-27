@@ -268,7 +268,7 @@ app.post('/simple-transcript-v2', async (req, res) => {
                 title: videoInfo.videoDetails.title,
                 transcript: transcriptText,
                 videoInfoSummary: {
-                  author: author,
+                  author: videoInfo.author,
                   description: videoInfo.videoDetails.description,
                   embed: videoInfo.embed,
                   thumbnails: videoInfo.videoDetails.thumbnails,
