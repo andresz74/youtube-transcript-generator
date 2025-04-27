@@ -328,7 +328,7 @@ app.post('/simple-transcript-v2', async (req, res) => {
           transcript: transcriptText,
           languages: languages.length > 1 ? languages : undefined, // Only include if more than one language
           videoInfoSummary: {
-            author: author,
+            author: videoInfo.author,
             description: videoInfo.videoDetails.description,
             embed: videoInfo.embed,
             thumbnails: videoInfo.videoDetails.thumbnails,
