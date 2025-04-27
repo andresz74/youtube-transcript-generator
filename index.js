@@ -272,6 +272,7 @@ app.post('/simple-transcript-v2', async (req, res) => {
           duration: duration,
           title: videoInfo.videoDetails.title,
           transcript: transcriptText,
+          transcriptLanguageCode: lang,
           languages: languages.length > 1 ? languages : undefined, // Only include if more than one language
           videoInfoSummary: {
             author: videoInfo.videoDetails.author,
@@ -300,7 +301,9 @@ app.post('/simple-transcript-v2', async (req, res) => {
 
     // If no English subtitles, fetch the transcript of the first available caption track
     let transcriptText = '';
+    let transcriptLanguageCode = '';
     if (englishTrack) {
+      transcriptLanguageCode = englishTrack.languageCode;
       // Fetch the transcript in English if available
       const transcript = await getSubtitles({
         videoID: videoId,
@@ -313,6 +316,7 @@ app.post('/simple-transcript-v2', async (req, res) => {
         throw new Error(`No English captions available.`);
       }
     } else {
+      transcriptLanguageCode = captionTracks[0].languageCode; // Fallback to the first available track
       // Fetch the transcript in the first available language
       const firstAvailableTrack = captionTracks[0]; // First available track
       const firstLanguageCode = firstAvailableTrack.languageCode;
@@ -334,6 +338,7 @@ app.post('/simple-transcript-v2', async (req, res) => {
       duration: duration,
       title: videoInfo.videoDetails.title,
       transcript: transcriptText,
+      transcriptLanguageCode: transcriptLanguageCode,
       languages: languages.length > 1 ? languages : undefined, // Only include if more than one language
       videoInfoSummary: {
         author: videoInfo.videoDetails.author,
