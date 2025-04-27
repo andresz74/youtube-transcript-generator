@@ -296,8 +296,8 @@ app.post('/simple-transcript-v2', async (req, res) => {
     }));
 
     // Try to find English subtitles (preferably non-auto-generated)
-    let englishTrack = captionTracks.find(track => track.languageCode === 'en' && track.kind !== 'asr')
-      || captionTracks.find(track => track.languageCode === 'en');  // Fallback to auto-generated if necessary
+    let englishTrack = captionTracks.find(track => track.languageCode.startsWith('en') && track.kind !== 'asr')
+      || captionTracks.find(track => track.languageCode.startsWith('en'));
 
     // If no English subtitles, fetch the transcript of the first available caption track
     let transcriptText = '';
