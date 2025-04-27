@@ -268,11 +268,11 @@ app.post('/simple-transcript-v2', async (req, res) => {
                 title: videoInfo.videoDetails.title,
                 transcript: transcriptText,
                 videoInfoSummary: {
-                  author: videoInfo.author,
+                  author: videoInfo.videoDetails.author,
                   description: videoInfo.videoDetails.description,
-                  embed: videoInfo.embed,
+                  embed: videoInfo.videoDetails.embed,
                   thumbnails: videoInfo.videoDetails.thumbnails,
-                  video_url: videoInfo.video_url,
+                  video_url: videoInfo.videoDetails.video_url,
                 }
             };
             // Send the simplified transcript response
@@ -328,11 +328,11 @@ app.post('/simple-transcript-v2', async (req, res) => {
           transcript: transcriptText,
           languages: languages.length > 1 ? languages : undefined, // Only include if more than one language
           videoInfoSummary: {
-            author: videoInfo.author,
+            author: videoInfo.videoDetails.author,
             description: videoInfo.videoDetails.description,
-            embed: videoInfo.embed,
+            embed: videoInfo.videoDetails.embed,
             thumbnails: videoInfo.videoDetails.thumbnails,
-            video_url: videoInfo.video_url,
+            video_url: videoInfo.videoDetails.video_url,
           }
       };
 
