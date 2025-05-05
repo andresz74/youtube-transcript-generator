@@ -27,8 +27,12 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
-  // Log every request with relevant details for debugging and monitoring
-  logger.info(`Endpoint Hit: ${req.method} ${req.originalUrl} - ${new Date().toISOString()}`);
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  const userAgent = req.headers['user-agent'] || 'Unknown';
+  const referer = req.headers['referer'] || 'None';
+  
+  logger.info(`Endpoint Hit: ${req.method} ${req.originalUrl} - IP: ${ip} - UA: ${userAgent} - Ref: ${referer} - ${new Date().toISOString()}`);
+
   next();
 });
 
