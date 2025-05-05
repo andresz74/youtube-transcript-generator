@@ -25,3 +25,4 @@ yarn-error.log*
 
 firebaseServiceAccount.json
 ecosystem.config.js
+*.excalidraw
