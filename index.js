@@ -364,6 +364,117 @@ app.post('/simple-transcript-v2', async (req, res) => {
 });
 
 
+app.post('/simple-transcript-v3', async (req, res) => {
+  try {
+    const { url, lang } = req.body;
+    console.log('URL:', url, ', Language:', lang);
+
+    const isShort = url.includes('/shorts/');
+    console.log('isShort:', isShort);
+
+    const videoId = ytdl.getURLVideoID(url);
+
+    // Firestore reference
+    const docRef = db.collection('transcripts-multilingual').doc(videoId);
+    const doc = await docRef.get();
+
+    // If cached version exists, return it
+    if (doc.exists) {
+      console.log(`Transcript found in Firebase for ${videoId}`);
+      return res.json(doc.data());
+    }
+
+    // Get video info
+    const videoInfo = await ytdl.getBasicInfo(url);
+    const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
+
+    const captionTracks = videoInfo.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+
+    if (!captionTracks || captionTracks.length === 0) {
+      return res.status(404).json({ message: 'No captions available for this video.' });
+    }
+
+    const languages = captionTracks.map(track => ({
+      name: track.name.simpleText,
+      code: track.languageCode
+    }));
+
+    // Function to fetch transcript and return text
+    const fetchTranscript = async (videoId, languageCode) => {
+      const transcript = await getSubtitles({ videoID: videoId, lang: languageCode });
+      return transcript.map(item => item.text).join(' ');
+    };
+
+    const transcriptArray = [];
+
+    // If specific language requested
+    if (lang) {
+      const langTrack = captionTracks.find(track => track.languageCode === lang);
+      if (!langTrack) {
+        return res.status(404).json({ message: `No captions available in the requested language (${lang}).` });
+      }
+
+      const transcriptText = await fetchTranscript(videoId, lang);
+
+      transcriptArray.push({
+        language: lang,
+        title: videoInfo.videoDetails.title,
+        transcript: transcriptText
+      });
+
+    } else {
+      // If no language requested, try English first, fallback to first available language
+      let preferredTrack = captionTracks.find(track => track.languageCode.startsWith('en') && track.kind !== 'asr')
+                          || captionTracks.find(track => track.languageCode.startsWith('en'));
+
+      if (!preferredTrack) {
+        preferredTrack = captionTracks[0]; // Fallback
+      }
+
+      const transcriptText = await fetchTranscript(videoId, preferredTrack.languageCode);
+
+      transcriptArray.push({
+        language: preferredTrack.languageCode,
+        title: videoInfo.videoDetails.title,
+        transcript: transcriptText
+      });
+    }
+
+    // Save to Firestore
+    await docRef.set({
+      videoID: videoId,
+      duration: duration,
+      transcript: transcriptArray,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    console.log(`Transcript saved to Firebase for ${videoId}`);
+
+    // Send the response
+    res.json({
+      videoID: videoId,
+      duration: duration,
+      transcript: transcriptArray,
+      languages: languages.length > 1 ? languages : undefined,
+      videoInfoSummary: {
+        author: videoInfo.videoDetails.author,
+        description: videoInfo.videoDetails.description,
+        embed: videoInfo.videoDetails.embed,
+        thumbnails: videoInfo.videoDetails.thumbnails,
+        viewCount: videoInfo.videoDetails.viewCount,
+        publishDate: videoInfo.videoDetails.publishDate,
+        video_url: videoInfo.videoDetails.video_url,
+      }
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ message: 'An error occurred while fetching and saving the transcript.' });
+  }
+});
+
+
+
 /**
  * POST /smart-transcript
  * Fetches the transcript for a YouTube video, either from Firestore (if cached) or from YouTube (and stores it in Firestore).
