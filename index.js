@@ -382,10 +382,12 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
       // Fallback to match language prefix (en vs en-US)
       if (!cachedTranscript && lang) {
+        console.log(`No exact match for ${lang}, trying prefix match...`);
         cachedTranscript = cached.transcript.find(t => t.language.startsWith(lang));
       }
 
       if (cachedTranscript) {
+        console.log(`Transcript found in Firebase for ${videoId} in ${lang}`);
         return res.json({
           videoID: cached.videoID,
           duration: cached.duration,
