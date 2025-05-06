@@ -379,20 +379,31 @@ app.post('/simple-transcript-v3', async (req, res) => {
     // If cached version exists, return immediately
     if (doc.exists) {
       console.log(`Transcript found in Firebase for ${videoId}`);
-
+    
       const cached = doc.data();
-      const cachedTranscript = cached.transcript.find(t => t.language === lang) || cached.transcript[0];
-
-      return res.json({
-        videoID: cached.videoID,
-        duration: cached.duration,
-        transcript: cachedTranscript.transcript,
-        transcriptLanguageCode: cachedTranscript.language,
-        languages: cached.transcript.length > 1 
-          ? cached.transcript.map(t => ({ code: t.language })) 
-          : undefined
-      });
-    }
+    
+      // Try exact match first
+      let cachedTranscript = cached.transcript.find(t => t.language === lang);
+    
+      // Fallback → match by just language prefix (for cases like en and en-US)
+      if (!cachedTranscript && lang) {
+        cachedTranscript = cached.transcript.find(t => t.language.startsWith(lang));
+      }
+    
+      if (cachedTranscript) {
+        // If found, return it
+        return res.json({
+          videoID: cached.videoID,
+          duration: cached.duration,
+          title: cachedTranscript.title,
+          transcript: cachedTranscript.transcript,
+          transcriptLanguageCode: cachedTranscript.language,
+          languages: cached.transcript.length > 1 
+            ? cached.transcript.map(t => ({ code: t.language })) 
+            : undefined
+        });
+      }
+    }    
 
     // Get video info
     const videoInfo = await ytdl.getBasicInfo(url);
