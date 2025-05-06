@@ -117,9 +117,77 @@ This endpoint returns a simplified version of the transcript, which includes the
 - **`title`**: Title of the video.
 - **`transcript`**: Full transcript as a concatenated string.
 
+
+
+
+
+
+Perfect — here’s a clean and concise version for **API docs / OpenAPI / Swagger style documentation**:
+
 ---
 
-### 3. **POST `/smart-transcript`**
+### 3. **POST `/simple-transcript-v3`**
+
+**Description**
+Fetches and returns the transcript of a YouTube video in a requested language (or default language if not specified). Caches transcripts per language for faster future access.
+
+**Request Body**
+
+```json
+{
+  "url": "string (required) - YouTube video URL",
+  "lang": "string (optional) - Language code (e.g. en, es, en-US)"
+}
+```
+
+**Response 200**
+
+```json
+{
+  "videoID": "string",
+  "duration": "number (minutes)",
+  "title": "string",
+  "transcript": "string",
+  "transcriptLanguageCode": "string",
+  "languages": [
+    { "code": "string" }
+  ],
+  "videoInfoSummary": {
+    "author": "string",
+    "description": "string",
+    "embed": "object",
+    "thumbnails": "array",
+    "viewCount": "string",
+    "publishDate": "string",
+    "video_url": "string"
+  }
+}
+```
+
+**Response 404**
+
+```json
+{
+  "message": "No captions available for this video."
+}
+```
+
+**Response 500**
+
+```json
+{
+  "message": "An error occurred while fetching and saving the transcript."
+}
+```
+
+**Notes**
+
+* `languages` is only included if more than one caption language is available.
+* Cached transcripts are automatically updated and stored by video ID and language.
+
+---
+
+### 4. **POST `/smart-transcript`**
 
 This endpoint checks Firestore for an existing transcript for the specified YouTube video. If it exists, the cached version is returned. If not, it fetches the transcript, stores it in Firestore, and returns the result.
 
@@ -151,7 +219,7 @@ This endpoint checks Firestore for an existing transcript for the specified YouT
 
 ---
 
-### 4. **POST `/smart-summary`**
+### 5. **POST `/smart-summary`**
 
 This endpoint checks Firestore for a summary of the specified YouTube video. If a summary exists, it is returned from the cache. If not, the service uses the provided transcript (or fetches it from YouTube) and generates a summary using a model (e.g., ChatGPT).
 
@@ -183,7 +251,7 @@ This endpoint checks Firestore for a summary of the specified YouTube video. If 
 
 ---
 
-### 5. **POST `/smart-summary-firebase`**
+### 6. **POST `/smart-summary-firebase`**
 
 This endpoint operates similarly to `/smart-summary`, but it offloads the summary generation and caching to Firestore itself. It sends only the video ID to a model to generate the summary, stores it in Firestore, and returns the summary.
 

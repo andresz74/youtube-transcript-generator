@@ -363,6 +363,223 @@ app.post('/simple-transcript-v2', async (req, res) => {
   }
 });
 
+/**
+ * POST /simple-transcript-v3
+ * Fetches and returns the video title and concatenated transcript for a requested language (or default language if none requested).
+ * Caches transcripts by video ID and language in Firestore for faster future access.
+ * 
+ * Request Body:
+ *   url (string): The URL of the YouTube video.
+ *   lang (string, optional): The language code to fetch the transcript in (e.g., "en", "es", "en-US").
+ * 
+ * Response:
+ *   200: JSON object containing:
+ *     - videoID (string): The YouTube video ID.
+ *     - duration (number): The video duration in minutes.
+ *     - title (string): The title of the video.
+ *     - transcript (string): The concatenated transcript text in the selected or default language.
+ *     - transcriptLanguageCode (string): The language code of the returned transcript.
+ *     - languages (array, optional): Array of available languages (only included if more than one language is available).
+ *     - videoInfoSummary (object): Basic video metadata (author, description, embed info, thumbnails, view count, publish date, video URL).
+ * 
+ *   404: No captions available for this video or in the requested language.
+ * 
+ *   500: An error occurred while fetching or saving the transcript.
+ */
+
+app.post('/simple-transcript-v3', async (req, res) => {
+  try {
+    const { url, lang } = req.body;
+    console.log('URL:', url, ', Language:', lang);
+
+    const videoId = ytdl.getURLVideoID(url);
+    const docRef = db.collection('transcripts-multilingual').doc(videoId);
+    const doc = await docRef.get();
+
+    // ------------------------------
+    // If cached transcript exists → use it
+    // ------------------------------
+    if (doc.exists) {
+      console.log(`Transcript found in Firebase for ${videoId}`);
+      const cached = doc.data();
+      const availableLanguages = cached.availableLanguages;
+    
+      let cachedTranscript = null;
+    
+      // Find exact or prefix match if lang is provided
+      if (lang) {
+        cachedTranscript = cached.transcript.find(t => t.language === lang) 
+                        || cached.transcript.find(t => t.language.startsWith(lang));
+      }
+    
+      if (!lang) {
+        // No lang requested → fallback to first cached transcript
+        cachedTranscript = cached.transcript[0];
+    
+        return res.json({
+          videoID: cached.videoID,
+          duration: cached.duration,
+          title: cachedTranscript.title,
+          transcript: cachedTranscript.transcript,
+          transcriptLanguageCode: cachedTranscript.language,
+          languages: availableLanguages.length > 0 ? availableLanguages : undefined
+        });
+      }
+    
+      if (cachedTranscript) {
+        // Lang requested and cached → return cached
+        return res.json({
+          videoID: cached.videoID,
+          duration: cached.duration,
+          title: cachedTranscript.title,
+          transcript: cachedTranscript.transcript,
+          transcriptLanguageCode: cachedTranscript.language,
+          languages: availableLanguages.length > 0 ? availableLanguages : undefined
+        });
+      }
+    
+      // 🚨 Lang requested and NOT cached → FETCH FROM YOUTUBE
+      const videoInfo = await ytdl.getBasicInfo(url);
+      const transcriptText = await getSubtitles({ videoID: videoId, lang });
+      const transcriptTextJoined = transcriptText.map(item => item.text).join(' ');
+    
+      // Update transcript array
+      const transcriptArray = cached.transcript;
+      transcriptArray.push({
+        language: lang,
+        title: videoInfo.videoDetails.title,
+        transcript: transcriptTextJoined
+      });
+    
+      // Save updated array
+      await docRef.set({
+        videoID: cached.videoID,
+        duration: cached.duration,
+        transcript: transcriptArray,
+        availableLanguages: availableLanguages,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    
+      return res.json({
+        videoID: cached.videoID,
+        duration: cached.duration,
+        title: videoInfo.videoDetails.title,
+        transcript: transcriptTextJoined,
+        transcriptLanguageCode: lang,
+        languages: availableLanguages.length > 0 ? availableLanguages : undefined
+      });
+    }    
+
+    // ------------------------------
+    // No cached transcript → fetch video info and captions
+    // ------------------------------
+    const videoInfo = await ytdl.getBasicInfo(url);
+    const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
+    const captionTracks = videoInfo.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+
+    if (!captionTracks || captionTracks.length === 0) {
+      return res.status(404).json({ message: 'No captions available for this video.' });
+    }
+
+    // Prepare available languages list (to be saved to Firestore)
+    const availableLanguages = captionTracks.map(track => ({
+      name: track.name.simpleText,
+      code: track.languageCode
+    }));
+
+    const fetchTranscript = async (videoId, languageCode) => {
+      const transcript = await getSubtitles({ videoID: videoId, lang: languageCode });
+      return transcript.map(item => item.text).join(' ');
+    };
+
+    // Load or initialize transcript array
+    const existingData = doc.exists ? doc.data() : null;
+    let transcriptArray = existingData ? existingData.transcript : [];
+
+    let selectedTranscriptText = '';
+    let selectedLanguageCode = '';
+
+    // ------------------------------
+    // Determine which language to fetch
+    // ------------------------------
+    if (lang) {
+      const langTrack = captionTracks.find(track => track.languageCode === lang);
+      if (!langTrack) {
+        return res.status(404).json({ message: `No captions available in the requested language (${lang}).` });
+      }
+
+      selectedLanguageCode = lang;
+      selectedTranscriptText = await fetchTranscript(videoId, lang);
+
+    } else {
+      const preferredTrack = captionTracks.find(track => track.languageCode.startsWith('en') && track.kind !== 'asr')
+                          || captionTracks.find(track => track.languageCode.startsWith('en'))
+                          || captionTracks[0];
+
+      selectedLanguageCode = preferredTrack.languageCode;
+      selectedTranscriptText = await fetchTranscript(videoId, selectedLanguageCode);
+    }
+
+    // ------------------------------
+    // Update transcript array (add or update)
+    // ------------------------------
+    const existingIndex = transcriptArray.findIndex(t => t.language === selectedLanguageCode);
+
+    if (existingIndex !== -1) {
+      // Update existing transcript
+      transcriptArray[existingIndex] = {
+        language: selectedLanguageCode,
+        title: videoInfo.videoDetails.title,
+        transcript: selectedTranscriptText
+      };
+    } else {
+      // Add new transcript
+      transcriptArray.push({
+        language: selectedLanguageCode,
+        title: videoInfo.videoDetails.title,
+        transcript: selectedTranscriptText
+      });
+    }
+
+    // ------------------------------
+    // Save everything to Firestore
+    // ------------------------------
+    await docRef.set({
+      videoID: videoId,
+      duration: duration,
+      transcript: transcriptArray,
+      availableLanguages: availableLanguages,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    console.log(`Transcript saved to Firebase for ${videoId}`);
+
+    // ------------------------------
+    // Return response
+    // ------------------------------
+    res.json({
+      videoID: videoId,
+      duration: duration,
+      title: videoInfo.videoDetails.title,
+      transcript: selectedTranscriptText,
+      transcriptLanguageCode: selectedLanguageCode,
+      languages: availableLanguages.length > 0 ? availableLanguages : undefined,
+      videoInfoSummary: {
+        author: videoInfo.videoDetails.author,
+        description: videoInfo.videoDetails.description,
+        embed: videoInfo.videoDetails.embed,
+        thumbnails: videoInfo.videoDetails.thumbnails,
+        viewCount: videoInfo.videoDetails.viewCount,
+        publishDate: videoInfo.videoDetails.publishDate,
+        video_url: videoInfo.videoDetails.video_url,
+      }
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ message: 'An error occurred while fetching and saving the transcript.' });
+  }
+});
 
 /**
  * POST /smart-transcript
