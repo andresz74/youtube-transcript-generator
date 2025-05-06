@@ -369,29 +369,23 @@ app.post('/simple-transcript-v3', async (req, res) => {
     const { url, lang } = req.body;
     console.log('URL:', url, ', Language:', lang);
 
-    const isShort = url.includes('/shorts/');
-    console.log('isShort:', isShort);
-
     const videoId = ytdl.getURLVideoID(url);
     const docRef = db.collection('transcripts-multilingual').doc(videoId);
     const doc = await docRef.get();
 
-    // If cached version exists, return immediately
+    // If cached version exists, return if language exists
     if (doc.exists) {
       console.log(`Transcript found in Firebase for ${videoId}`);
-    
       const cached = doc.data();
-    
-      // Try exact match first
+
       let cachedTranscript = cached.transcript.find(t => t.language === lang);
-    
-      // Fallback → match by just language prefix (for cases like en and en-US)
+
+      // Fallback to match language prefix (en vs en-US)
       if (!cachedTranscript && lang) {
         cachedTranscript = cached.transcript.find(t => t.language.startsWith(lang));
       }
-    
+
       if (cachedTranscript) {
-        // If found, return it
         return res.json({
           videoID: cached.videoID,
           duration: cached.duration,
@@ -403,12 +397,11 @@ app.post('/simple-transcript-v3', async (req, res) => {
             : undefined
         });
       }
-    }    
+    }
 
     // Get video info
     const videoInfo = await ytdl.getBasicInfo(url);
     const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
-
     const captionTracks = videoInfo.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
     if (!captionTracks || captionTracks.length === 0) {
@@ -420,13 +413,15 @@ app.post('/simple-transcript-v3', async (req, res) => {
       code: track.languageCode
     }));
 
-    // Function to fetch transcript
     const fetchTranscript = async (videoId, languageCode) => {
       const transcript = await getSubtitles({ videoID: videoId, lang: languageCode });
       return transcript.map(item => item.text).join(' ');
     };
 
-    const transcriptArray = [];
+    // Load existing transcript array (important fix!)
+    const existingData = doc.exists ? doc.data() : null;
+    let transcriptArray = existingData ? existingData.transcript : [];
+
     let selectedTranscriptText = '';
     let selectedLanguageCode = '';
 
@@ -439,19 +434,27 @@ app.post('/simple-transcript-v3', async (req, res) => {
       selectedLanguageCode = lang;
       selectedTranscriptText = await fetchTranscript(videoId, lang);
 
-      transcriptArray.push({
-        language: lang,
-        title: videoInfo.videoDetails.title,
-        transcript: selectedTranscriptText
-      });
     } else {
       let preferredTrack = captionTracks.find(track => track.languageCode.startsWith('en') && track.kind !== 'asr')
-                          || captionTracks.find(track => track.languageCode.startsWith('en'))
-                          || captionTracks[0];
+                        || captionTracks.find(track => track.languageCode.startsWith('en'))
+                        || captionTracks[0];
 
       selectedLanguageCode = preferredTrack.languageCode;
       selectedTranscriptText = await fetchTranscript(videoId, selectedLanguageCode);
+    }
 
+    // Check if transcript for selected language already exists in the array
+    const existingIndex = transcriptArray.findIndex(t => t.language === selectedLanguageCode);
+
+    if (existingIndex !== -1) {
+      // Update existing language transcript
+      transcriptArray[existingIndex] = {
+        language: selectedLanguageCode,
+        title: videoInfo.videoDetails.title,
+        transcript: selectedTranscriptText
+      };
+    } else {
+      // Add new language transcript
       transcriptArray.push({
         language: selectedLanguageCode,
         title: videoInfo.videoDetails.title,
@@ -459,7 +462,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
       });
     }
 
-    // Save to Firebase
+    // Save merged transcripts array back to Firestore
     await docRef.set({
       videoID: videoId,
       duration: duration,
@@ -469,7 +472,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
     console.log(`Transcript saved to Firebase for ${videoId}`);
 
-    // Return only selected transcript
+    // Return only the selected transcript
     res.json({
       videoID: videoId,
       duration: duration,
