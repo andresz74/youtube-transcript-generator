@@ -403,31 +403,72 @@ app.post('/simple-transcript-v3', async (req, res) => {
       console.log(`Transcript found in Firebase for ${videoId}`);
       const cached = doc.data();
       const availableLanguages = cached.availableLanguages;
-
+    
       let cachedTranscript = null;
-
-      // If lang is requested → try exact and prefix match
+    
+      // Find exact or prefix match if lang is provided
       if (lang) {
-        cachedTranscript = cached.transcript.find(t => t.language === lang);
-        if (!cachedTranscript) {
-          cachedTranscript = cached.transcript.find(t => t.language.startsWith(lang));
-        }
+        cachedTranscript = cached.transcript.find(t => t.language === lang) 
+                        || cached.transcript.find(t => t.language.startsWith(lang));
       }
-
-      // If no lang provided or no match → fallback to first cached transcript
-      if (!cachedTranscript) {
+    
+      if (!lang) {
+        // No lang requested → fallback to first cached transcript
         cachedTranscript = cached.transcript[0];
+    
+        return res.json({
+          videoID: cached.videoID,
+          duration: cached.duration,
+          title: cachedTranscript.title,
+          transcript: cachedTranscript.transcript,
+          transcriptLanguageCode: cachedTranscript.language,
+          languages: availableLanguages.length > 0 ? availableLanguages : undefined
+        });
       }
-
+    
+      if (cachedTranscript) {
+        // Lang requested and cached → return cached
+        return res.json({
+          videoID: cached.videoID,
+          duration: cached.duration,
+          title: cachedTranscript.title,
+          transcript: cachedTranscript.transcript,
+          transcriptLanguageCode: cachedTranscript.language,
+          languages: availableLanguages.length > 0 ? availableLanguages : undefined
+        });
+      }
+    
+      // 🚨 Lang requested and NOT cached → FETCH FROM YOUTUBE
+      const videoInfo = await ytdl.getBasicInfo(url);
+      const transcriptText = await getSubtitles({ videoID: videoId, lang });
+      const transcriptTextJoined = transcriptText.map(item => item.text).join(' ');
+    
+      // Update transcript array
+      const transcriptArray = cached.transcript;
+      transcriptArray.push({
+        language: lang,
+        title: videoInfo.videoDetails.title,
+        transcript: transcriptTextJoined
+      });
+    
+      // Save updated array
+      await docRef.set({
+        videoID: cached.videoID,
+        duration: cached.duration,
+        transcript: transcriptArray,
+        availableLanguages: availableLanguages,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    
       return res.json({
         videoID: cached.videoID,
         duration: cached.duration,
-        title: cachedTranscript.title,
-        transcript: cachedTranscript.transcript,
-        transcriptLanguageCode: cachedTranscript.language,
+        title: videoInfo.videoDetails.title,
+        transcript: transcriptTextJoined,
+        transcriptLanguageCode: lang,
         languages: availableLanguages.length > 0 ? availableLanguages : undefined
       });
-    }
+    }    
 
     // ------------------------------
     // No cached transcript → fetch video info and captions
