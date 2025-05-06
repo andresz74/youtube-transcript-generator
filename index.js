@@ -462,6 +462,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
     res.json({
       videoID: videoId,
       duration: duration,
+      title: videoInfo.videoDetails.title,
       transcript: selectedTranscriptText,
       transcriptLanguageCode: selectedLanguageCode,
       languages: languages.length > 1 ? languages : undefined,
