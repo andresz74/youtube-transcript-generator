@@ -373,15 +373,25 @@ app.post('/simple-transcript-v3', async (req, res) => {
     console.log('isShort:', isShort);
 
     const videoId = ytdl.getURLVideoID(url);
-
-    // Firestore reference
     const docRef = db.collection('transcripts-multilingual').doc(videoId);
     const doc = await docRef.get();
 
-    // If cached version exists, return it
+    // If cached version exists, return immediately
     if (doc.exists) {
       console.log(`Transcript found in Firebase for ${videoId}`);
-      return res.json(doc.data());
+
+      const cached = doc.data();
+      const cachedTranscript = cached.transcript.find(t => t.language === lang) || cached.transcript[0];
+
+      return res.json({
+        videoID: cached.videoID,
+        duration: cached.duration,
+        transcript: cachedTranscript.transcript,
+        transcriptLanguageCode: cachedTranscript.language,
+        languages: cached.transcript.length > 1 
+          ? cached.transcript.map(t => ({ code: t.language })) 
+          : undefined
+      });
     }
 
     // Get video info
@@ -399,48 +409,46 @@ app.post('/simple-transcript-v3', async (req, res) => {
       code: track.languageCode
     }));
 
-    // Function to fetch transcript and return text
+    // Function to fetch transcript
     const fetchTranscript = async (videoId, languageCode) => {
       const transcript = await getSubtitles({ videoID: videoId, lang: languageCode });
       return transcript.map(item => item.text).join(' ');
     };
 
     const transcriptArray = [];
+    let selectedTranscriptText = '';
+    let selectedLanguageCode = '';
 
-    // If specific language requested
     if (lang) {
       const langTrack = captionTracks.find(track => track.languageCode === lang);
       if (!langTrack) {
         return res.status(404).json({ message: `No captions available in the requested language (${lang}).` });
       }
 
-      const transcriptText = await fetchTranscript(videoId, lang);
+      selectedLanguageCode = lang;
+      selectedTranscriptText = await fetchTranscript(videoId, lang);
 
       transcriptArray.push({
         language: lang,
         title: videoInfo.videoDetails.title,
-        transcript: transcriptText
+        transcript: selectedTranscriptText
       });
-
     } else {
-      // If no language requested, try English first, fallback to first available language
       let preferredTrack = captionTracks.find(track => track.languageCode.startsWith('en') && track.kind !== 'asr')
-                          || captionTracks.find(track => track.languageCode.startsWith('en'));
+                          || captionTracks.find(track => track.languageCode.startsWith('en'))
+                          || captionTracks[0];
 
-      if (!preferredTrack) {
-        preferredTrack = captionTracks[0]; // Fallback
-      }
-
-      const transcriptText = await fetchTranscript(videoId, preferredTrack.languageCode);
+      selectedLanguageCode = preferredTrack.languageCode;
+      selectedTranscriptText = await fetchTranscript(videoId, selectedLanguageCode);
 
       transcriptArray.push({
-        language: preferredTrack.languageCode,
+        language: selectedLanguageCode,
         title: videoInfo.videoDetails.title,
-        transcript: transcriptText
+        transcript: selectedTranscriptText
       });
     }
 
-    // Save to Firestore
+    // Save to Firebase
     await docRef.set({
       videoID: videoId,
       duration: duration,
@@ -450,11 +458,12 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
     console.log(`Transcript saved to Firebase for ${videoId}`);
 
-    // Send the response
+    // Return only selected transcript
     res.json({
       videoID: videoId,
       duration: duration,
-      transcript: transcriptArray,
+      transcript: selectedTranscriptText,
+      transcriptLanguageCode: selectedLanguageCode,
       languages: languages.length > 1 ? languages : undefined,
       videoInfoSummary: {
         author: videoInfo.videoDetails.author,
@@ -472,8 +481,6 @@ app.post('/simple-transcript-v3', async (req, res) => {
     res.status(500).json({ message: 'An error occurred while fetching and saving the transcript.' });
   }
 });
-
-
 
 /**
  * POST /smart-transcript
