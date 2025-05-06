@@ -363,6 +363,29 @@ app.post('/simple-transcript-v2', async (req, res) => {
   }
 });
 
+/**
+ * POST /simple-transcript-v3
+ * Fetches and returns the video title and concatenated transcript for a requested language (or default language if none requested).
+ * Caches transcripts by video ID and language in Firestore for faster future access.
+ * 
+ * Request Body:
+ *   url (string): The URL of the YouTube video.
+ *   lang (string, optional): The language code to fetch the transcript in (e.g., "en", "es", "en-US").
+ * 
+ * Response:
+ *   200: JSON object containing:
+ *     - videoID (string): The YouTube video ID.
+ *     - duration (number): The video duration in minutes.
+ *     - title (string): The title of the video.
+ *     - transcript (string): The concatenated transcript text in the selected or default language.
+ *     - transcriptLanguageCode (string): The language code of the returned transcript.
+ *     - languages (array, optional): Array of available languages (only included if more than one language is available).
+ *     - videoInfoSummary (object): Basic video metadata (author, description, embed info, thumbnails, view count, publish date, video URL).
+ * 
+ *   404: No captions available for this video or in the requested language.
+ * 
+ *   500: An error occurred while fetching or saving the transcript.
+ */
 
 app.post('/simple-transcript-v3', async (req, res) => {
   try {
@@ -378,12 +401,21 @@ app.post('/simple-transcript-v3', async (req, res) => {
       console.log(`Transcript found in Firebase for ${videoId}`);
       const cached = doc.data();
 
-      let cachedTranscript = cached.transcript.find(t => t.language === lang);
+      let cachedTranscript = null;
 
-      // Fallback to match language prefix (en vs en-US)
-      if (!cachedTranscript && lang) {
-        console.log(`No exact match for ${lang}, trying prefix match...`);
-        cachedTranscript = cached.transcript.find(t => t.language.startsWith(lang));
+      // If lang is provided → try exact match
+      if (lang) {
+        cachedTranscript = cached.transcript.find(t => t.language === lang);
+
+        // Fallback to match language prefix (en vs en-US)
+        if (!cachedTranscript) {
+          cachedTranscript = cached.transcript.find(t => t.language.startsWith(lang));
+        }
+      }
+
+      // If lang not provided OR no match → fallback to first transcript
+      if (!cachedTranscript) {
+        cachedTranscript = cached.transcript[0];
       }
 
       if (cachedTranscript) {
