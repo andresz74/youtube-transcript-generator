@@ -1001,7 +1001,7 @@ app.post('/smart-summary-firebase-v2', async (req, res) => {
     }
 
     // 🧠 Call your deployed endpoint that returns both summary and tags
-    const response = await axios.post('https://your-deployed-domain.vercel.app/api/openai-chat-youtube-transcript-v2', {
+    const response = await axios.post(modelUrl, {
       videoId,
     });
 
