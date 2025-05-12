@@ -1024,7 +1024,7 @@ ${(metadata.tags || []).map(tag => `  - ${tag}`).join('\n')}
 canonical_url: ${metadata.canonical_url}\n
 author: ${metadata.author}
 ---
-![](![](https://www.youtube.com/watch?v=${videoId}))
+![](https://www.youtube.com/watch?v=${videoId})
 # ${metadata.title}\n`;
 
     const summaryWithFrontmatter = `${frontmatter}${plainSummary}`;
