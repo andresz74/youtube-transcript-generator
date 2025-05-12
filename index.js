@@ -1013,18 +1013,18 @@ app.post('/smart-summary-firebase-v2', async (req, res) => {
 
     // Format frontmatter from metadata
     const frontmatter = `---
-      title: "${metadata.title}"\n
-      date: ${metadata.date}\n
-      description: |
-        ${metadata.description}\n
-      image: '${metadata.image}'\n
-      tags:
-        - youtube
-      ${(metadata.tags || []).map(tag => `  - ${tag}`).join('\n')}
-      canonical_url: ${metadata.canonical_url}\n
-      author: ${metadata.author}
-      ---\n\n
-      # ${metadata.title}\n`;
+title: "${metadata.title}"
+date: ${metadata.date}
+description: |
+  ${metadata.description}
+image: '${metadata.image}'
+tags:
+  - youtube
+${(metadata.tags || []).map(tag => `  - ${tag}`).join('\n')}
+canonical_url: ${metadata.canonical_url}\n
+author: ${metadata.author}
+---\n\n
+# ${metadata.title}\n`;
 
     const summaryWithFrontmatter = `${frontmatter}${plainSummary}`;
 
