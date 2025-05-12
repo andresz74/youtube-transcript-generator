@@ -671,6 +671,102 @@ app.post('/smart-transcript', async (req, res) => {
   }
 });
 
+app.post('/smart-transcript-v2', async (req, res) => {
+  try {
+    const { url } = req.body;
+    const videoId = ytdl.getURLVideoID(url);
+
+    const docRef = db.collection('transcripts').doc(videoId);
+    const doc = await docRef.get();
+
+    if (doc.exists) {
+      console.log(`Transcript found in Firebase for ${videoId}`);
+      return res.json(doc.data());
+    }
+
+    const videoInfo = await ytdl.getBasicInfo(url);
+    const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
+
+    console.log('Video Info:', videoInfo);
+
+    const playerResponse = videoInfo.player_response;
+    if (!playerResponse || !playerResponse.captions || !playerResponse.captions.playerCaptionsTracklistRenderer) {
+      return res.status(404).json({ message: 'No captions available for this video.' });
+    }
+
+    const captionTracks = playerResponse.captions.playerCaptionsTracklistRenderer.captionTracks;
+    if (!captionTracks || captionTracks.length === 0) {
+      return res.status(404).json({ message: 'No captions available for this video.' });
+    }
+
+    const languageCode = captionTracks[0].languageCode;
+
+    try {
+      const transcript = await getSubtitles({ videoID: videoId, lang: languageCode });
+      if (!transcript || transcript.length === 0) {
+        throw new Error('No transcript available for this video.');
+      }
+
+      const transcriptText = transcript.map(item => item.text).join(' ');
+
+      // 🆕 Metadata to save
+      const title = videoInfo.videoDetails.title;
+      const description = videoInfo.videoDetails.shortDescription?.split('\n')[0] || '';
+      const publishedAt = videoInfo.videoDetails.publishDate || new Date().toISOString().split('T')[0];
+      const date = publishedAt.replace(/-/g, '/');
+      const image = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
+
+      // Naive tag inference (improve later)
+      const tags = Array.from(
+        new Set(
+          title
+            .toLowerCase()
+            .match(/\b\w+\b/g)
+            .filter(word => ['iphone', 'shortcut', 'automation', 'tech', 'apple', 'ios', 'productivity'].includes(word))
+        )
+      );
+
+      const canonical_url = `https://blog.andreszenteno.com/notes/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+
+      // 📝 Save all metadata + transcript
+      await docRef.set({
+        videoId,
+        title,
+        description,
+        date,
+        image,
+        tags,
+        canonical_url,
+        author: 'Andres Zenteno',
+        duration,
+        transcript: transcriptText,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(`Full transcript and metadata stored in Firebase for ${videoId}`);
+
+      res.json({
+        videoId,
+        title,
+        duration,
+        transcript: transcriptText,
+        description,
+        date,
+        image,
+        tags,
+        canonical_url,
+      });
+
+    } catch (transcriptError) {
+      console.error('Error fetching transcript:', transcriptError.message);
+      res.status(404).json({ message: 'No transcript found for this video.' });
+    }
+  } catch (error) {
+    console.error('Error fetching/storing transcript:', error);
+    res.status(500).json({ message: 'An error occurred while processing the transcript.' });
+  }
+});
+
 
 /**
  * POST /smart-summary
@@ -869,6 +965,84 @@ app.post('/smart-summary-firebase', async (req, res) => {
     res.status(500).json({ message: 'Error generating smart summary' });
   }
 });
+
+app.post('/smart-summary-firebase-v2', async (req, res) => {
+  try {
+    const { url, model } = req.body;
+    if (!url) return res.status(400).json({ message: 'URL is required' });
+
+    const videoId = ytdl.getURLVideoID(url);
+    const db = admin.firestore();
+    const summariesRef = db.collection('summaries').doc(videoId);
+    const transcriptRef = db.collection('transcripts').doc(videoId);
+
+    // Check if the summary already exists
+    const summarySnap = await summariesRef.get();
+    if (summarySnap.exists) {
+      const data = summarySnap.data();
+      if (data.summary) {
+        console.log(`Summary found in Firebase for ${videoId}`);
+        return res.json({ summary: data.summary, fromCache: true });
+      }
+    }
+
+    // Load transcript metadata (title, date, etc.)
+    const transcriptSnap = await transcriptRef.get();
+    if (!transcriptSnap.exists) {
+      return res.status(404).json({ message: 'Transcript not found for this video.' });
+    }
+
+    const metadata = transcriptSnap.data();
+
+    // Ensure model is valid
+    const modelUrl = modelUrls[model];
+    if (!modelUrl) {
+      return res.status(400).json({ message: 'Invalid model specified' });
+    }
+
+    // Fetch summary using videoId (your model handles fetching the transcript from Firestore)
+    const response = await axios.post(modelUrl, { videoId });
+    const plainSummary =
+      model === 'anthropic'
+        ? response.data.content?.[0]?.text
+        : response.data.choices?.[0]?.message?.content;
+
+    if (!plainSummary) {
+      return res.status(500).json({ message: 'Model did not return a summary' });
+    }
+
+    // Format frontmatter from metadata
+    const frontmatter = `---
+title: "${metadata.title}"
+date: ${metadata.date}
+description: |
+  ${metadata.description}
+image: '${metadata.image}'
+tags:
+${(metadata.tags || []).map(tag => `  - ${tag}`).join('\n')}
+canonical_url: ${metadata.canonical_url}
+author: ${metadata.author}
+---\n\n`;
+
+    const summaryWithFrontmatter = `${frontmatter}${plainSummary}`;
+
+    // Save summary in Firebase
+    await summariesRef.set(
+      {
+        summary: summaryWithFrontmatter,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    res.json({ summary: summaryWithFrontmatter, fromCache: false });
+
+  } catch (err) {
+    console.error('Error in /smart-summary-firebase:', err);
+    res.status(500).json({ message: 'Error generating smart summary' });
+  }
+});
+
 
 const port = process.env.PORT || 3000;
 app.listen(port, '0.0.0.0', () => {
