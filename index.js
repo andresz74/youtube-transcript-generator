@@ -711,7 +711,7 @@ app.post('/smart-transcript-v2', async (req, res) => {
 
       // 🆕 Metadata to save
       const title = videoInfo.videoDetails.title;
-      const description = videoInfo.videoDetails.shortDescription?.split('\n')[0] || '';
+      const description = videoInfo.videoDetails.description?.split('\n')[0] || '';
       const publishedAt = videoInfo.videoDetails.publishDate || new Date().toISOString().split('T')[0];
       const date = publishedAt.replace(/-/g, '/');
       const image = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
