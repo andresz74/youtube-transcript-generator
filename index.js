@@ -30,7 +30,7 @@ app.use((req, res, next) => {
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   const userAgent = req.headers['user-agent'] || 'Unknown';
   const referer = req.headers['referer'] || 'None';
-  
+
   logger.info(`Endpoint Hit: ${req.method} ${req.originalUrl} - IP: ${ip} - UA: ${userAgent} - Ref: ${referer} - ${new Date().toISOString()}`);
 
   next();
@@ -403,19 +403,19 @@ app.post('/simple-transcript-v3', async (req, res) => {
       console.log(`Transcript found in Firebase for ${videoId}`);
       const cached = doc.data();
       const availableLanguages = cached.availableLanguages;
-    
+
       let cachedTranscript = null;
-    
+
       // Find exact or prefix match if lang is provided
       if (lang) {
-        cachedTranscript = cached.transcript.find(t => t.language === lang) 
-                        || cached.transcript.find(t => t.language.startsWith(lang));
+        cachedTranscript = cached.transcript.find(t => t.language === lang)
+          || cached.transcript.find(t => t.language.startsWith(lang));
       }
-    
+
       if (!lang) {
         // No lang requested → fallback to first cached transcript
         cachedTranscript = cached.transcript[0];
-    
+
         return res.json({
           videoID: cached.videoID,
           duration: cached.duration,
@@ -425,7 +425,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
           languages: availableLanguages.length > 0 ? availableLanguages : undefined
         });
       }
-    
+
       if (cachedTranscript) {
         // Lang requested and cached → return cached
         return res.json({
@@ -437,12 +437,12 @@ app.post('/simple-transcript-v3', async (req, res) => {
           languages: availableLanguages.length > 0 ? availableLanguages : undefined
         });
       }
-    
+
       // 🚨 Lang requested and NOT cached → FETCH FROM YOUTUBE
       const videoInfo = await ytdl.getBasicInfo(url);
       const transcriptText = await getSubtitles({ videoID: videoId, lang });
       const transcriptTextJoined = transcriptText.map(item => item.text).join(' ');
-    
+
       // Update transcript array
       const transcriptArray = cached.transcript;
       transcriptArray.push({
@@ -450,7 +450,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
         title: videoInfo.videoDetails.title,
         transcript: transcriptTextJoined
       });
-    
+
       // Save updated array
       await docRef.set({
         videoID: cached.videoID,
@@ -459,7 +459,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
         availableLanguages: availableLanguages,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
-    
+
       return res.json({
         videoID: cached.videoID,
         duration: cached.duration,
@@ -468,7 +468,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
         transcriptLanguageCode: lang,
         languages: availableLanguages.length > 0 ? availableLanguages : undefined
       });
-    }    
+    }
 
     // ------------------------------
     // No cached transcript → fetch video info and captions
@@ -513,8 +513,8 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
     } else {
       const preferredTrack = captionTracks.find(track => track.languageCode.startsWith('en') && track.kind !== 'asr')
-                          || captionTracks.find(track => track.languageCode.startsWith('en'))
-                          || captionTracks[0];
+        || captionTracks.find(track => track.languageCode.startsWith('en'))
+        || captionTracks[0];
 
       selectedLanguageCode = preferredTrack.languageCode;
       selectedTranscriptText = await fetchTranscript(videoId, selectedLanguageCode);
@@ -976,7 +976,7 @@ app.post('/smart-summary-firebase-v2', async (req, res) => {
     const summariesRef = db.collection('summaries').doc(videoId);
     const transcriptRef = db.collection('transcripts').doc(videoId);
 
-    // Check if the summary already exists
+    // Check if summary already exists
     const summarySnap = await summariesRef.get();
     if (summarySnap.exists) {
       const data = summarySnap.data();
@@ -986,7 +986,7 @@ app.post('/smart-summary-firebase-v2', async (req, res) => {
       }
     }
 
-    // Load transcript metadata (title, date, etc.)
+    // Get metadata from transcript doc
     const transcriptSnap = await transcriptRef.get();
     if (!transcriptSnap.exists) {
       return res.status(404).json({ message: 'Transcript not found for this video.' });
@@ -1000,18 +1000,19 @@ app.post('/smart-summary-firebase-v2', async (req, res) => {
       return res.status(400).json({ message: 'Invalid model specified' });
     }
 
-    // Fetch summary using videoId (your model handles fetching the transcript from Firestore)
-    const response = await axios.post(modelUrl, { videoId });
-    const plainSummary =
-      model === 'anthropic'
-        ? response.data.content?.[0]?.text
-        : response.data.choices?.[0]?.message?.content;
+    // 🧠 Call your deployed endpoint that returns both summary and tags
+    const response = await axios.post('https://your-deployed-domain.vercel.app/api/openai-chat-youtube-transcript-v2', {
+      videoId,
+    });
+
+    const plainSummary = response.data.summary?.choices?.[0]?.message?.content;
+    const tags = response.data.tags || [];
 
     if (!plainSummary) {
       return res.status(500).json({ message: 'Model did not return a summary' });
     }
 
-    // Format frontmatter from metadata
+    // 📝 Construct frontmatter
     const frontmatter = `---
 title: "${metadata.title}"
 date: ${metadata.date}
@@ -1019,9 +1020,8 @@ description: |
   ${metadata.description}
 image: '${metadata.image}'
 tags:
-  - youtube
-${(metadata.tags || []).map(tag => `  - ${tag}`).join('\n')}
-canonical_url: ${metadata.canonical_url}\n
+${tags.map(tag => `  - ${tag}`).join('\n')}
+canonical_url: ${metadata.canonical_url}
 author: ${metadata.author}
 ---
 ![](https://www.youtube.com/watch?v=${videoId})
@@ -1029,19 +1029,30 @@ author: ${metadata.author}
 
     const summaryWithFrontmatter = `${frontmatter}${plainSummary}`;
 
-    // Save summary in Firebase
+    // Save the summary to summaries collection
     await summariesRef.set(
       {
         summary: summaryWithFrontmatter,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        tags,
+      },
+      { merge: true }
+    );
+
+    // ✅ Update the tags in transcripts collection as well
+    await transcriptRef.set(
+      {
+        tags,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true }
     );
 
+
     res.json({ summary: summaryWithFrontmatter, fromCache: false });
 
   } catch (err) {
-    console.error('Error in /smart-summary-firebase:', err);
+    console.error('Error in /smart-summary-firebase-v2:', err);
     res.status(500).json({ message: 'Error generating smart summary' });
   }
 });
