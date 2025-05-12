@@ -10,7 +10,67 @@ This Express-based service fetches YouTube video information (metadata) and tran
 
 ## **Service Endpoints**
 
-### 1. **POST `/transcript`**
+### 1. **POST `/smart-transcript-v2`**
+
+**Description**
+Checks Firestore for a transcript of the YouTube video. If missing, fetches transcript, title, description, date, image, inferred tags, and stores them all in Firestore.
+
+**Request Body:**
+
+```json
+{
+  "url": "https://www.youtube.com/watch?v=VIDEO_ID"
+}
+```
+
+**Response 200:**
+
+```json
+{
+  "videoId": "VIDEO_ID",
+  "title": "Video Title",
+  "duration": 14,
+  "transcript": "Full transcript text...",
+  "description": "First line of the video description",
+  "date": "2025-01-26",
+  "image": "https://i.ytimg.com/vi/VIDEO_ID/maxresdefault.jpg",
+  "tags": ["ios", "automation", "shortcuts"],
+  "canonical_url": "https://blog.andreszenteno.com/notes/video-title"
+}
+```
+
+---
+
+### 2. **POST `/smart-summary-firebase-v2`**
+
+**Description**
+Checks Firestore for an existing summary. If not found, generates an AI-powered summary and tags using OpenAI, formats it with Markdown frontmatter, and saves it to `summaries` and `transcripts` collections.
+
+**Request Body:**
+
+```json
+{
+  "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "model": "openai"
+}
+```
+
+**Response 200:**
+
+```json
+{
+  "summary": "---\ntitle: \"Video Title\"\ndate: 2025-01-26\ntags:\n  - ios\n  - automation\n  - shortcuts\n---\n...summary...",
+  "fromCache": false
+}
+```
+
+* Uses the deployed AI service `/api/openai-chat-youtube-transcript-v2` to fetch `summary` and `tags`.
+* Markdown-compatible output can be used in Obsidian, static blogs, etc.
+* Tags are stored in both collections for indexing and reuse.
+
+---
+
+### 3. **POST `/transcript`**
 
 This endpoint retrieves full YouTube video information and timestamped captions (subtitles) in all available languages. It fetches video metadata (e.g., title, description, etc.) and subtitles (with timestamps) for all languages supported by the video.
 
@@ -89,7 +149,7 @@ This endpoint retrieves full YouTube video information and timestamped captions 
 
 ---
 
-### 2. **POST `/simple-transcript`**
+### 4. **POST `/simple-transcript`**
 
 This endpoint returns a simplified version of the transcript, which includes the video title and a concatenated string of subtitles in the first available language.
 
@@ -126,7 +186,7 @@ Perfect — here’s a clean and concise version for **API docs / OpenAPI / Swag
 
 ---
 
-### 3. **POST `/simple-transcript-v3`**
+### 5. **POST `/simple-transcript-v3`**
 
 **Description**
 Fetches and returns the transcript of a YouTube video in a requested language (or default language if not specified). Caches transcripts per language for faster future access.
@@ -187,7 +247,7 @@ Fetches and returns the transcript of a YouTube video in a requested language (o
 
 ---
 
-### 4. **POST `/smart-transcript`**
+### 6. **POST `/smart-transcript`**
 
 This endpoint checks Firestore for an existing transcript for the specified YouTube video. If it exists, the cached version is returned. If not, it fetches the transcript, stores it in Firestore, and returns the result.
 
@@ -219,7 +279,7 @@ This endpoint checks Firestore for an existing transcript for the specified YouT
 
 ---
 
-### 5. **POST `/smart-summary`**
+### 7. **POST `/smart-summary`**
 
 This endpoint checks Firestore for a summary of the specified YouTube video. If a summary exists, it is returned from the cache. If not, the service uses the provided transcript (or fetches it from YouTube) and generates a summary using a model (e.g., ChatGPT).
 
@@ -251,7 +311,7 @@ This endpoint checks Firestore for a summary of the specified YouTube video. If 
 
 ---
 
-### 6. **POST `/smart-summary-firebase`**
+### 8. **POST `/smart-summary-firebase`**
 
 This endpoint operates similarly to `/smart-summary`, but it offloads the summary generation and caching to Firestore itself. It sends only the video ID to a model to generate the summary, stores it in Firestore, and returns the summary.
 
@@ -281,7 +341,7 @@ This endpoint operates similarly to `/smart-summary`, but it offloads the summar
 
 ---
 
-### 6. **GET `/health`**
+### 9. **GET `/health`**
 
 A simple health check endpoint to verify that the service is running.
 
@@ -293,7 +353,7 @@ OK
 
 ---
 
-### 7. **GET `/debug`**
+### 10. **GET `/debug`**
 
 A debug endpoint that returns the IP address and region of the requestor.
 

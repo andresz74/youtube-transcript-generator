@@ -213,6 +213,36 @@ This endpoint checks if the transcript is already stored in Firestore. If found,
 
 ---
 
+### 🧠 POST `/smart-transcript-v2`
+
+Fetches the transcript and metadata for a YouTube video, stores it in Firestore if not already present.
+
+**Request:**
+
+```json
+{
+  "url": "https://www.youtube.com/watch?v=VIDEO_ID"
+}
+```
+
+**Response:**
+
+```json
+{
+  "videoId": "VIDEO_ID",
+  "title": "Video Title",
+  "duration": 14,
+  "transcript": "Transcript text...",
+  "description": "First line of the video description",
+  "date": "2025-01-26",
+  "image": "https://i.ytimg.com/vi/VIDEO_ID/maxresdefault.jpg",
+  "tags": ["ios", "automation", "shortcuts"],
+  "canonical_url": "https://blog.andreszenteno.com/notes/video-title"
+}
+```
+
+---
+
 ### 🧠 POST `/smart-summary`
 
 This endpoint checks Firestore for a summary of the video. If one exists, it's returned. If not, it uses the **ChatGPT API** to generate the summary (using the transcript), stores it in Firestore, and returns it.
@@ -263,6 +293,34 @@ This endpoint provides similar functionality to `/smart-summary` but offloads th
   "fromCache": true
 }
 ```
+
+---
+
+### ✅ POST `/smart-summary-firebase-v2`
+
+Generates a markdown-formatted AI summary with frontmatter and tags. Caches both in Firestore.
+
+**Request:**
+
+```json
+{
+  "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "model": "openai"
+}
+```
+
+**Response:**
+
+```json
+{
+  "summary": "---\ntitle: \"...\"\ndate: ...\ntags: [...]\n---\nSummary content...",
+  "fromCache": false
+}
+```
+
+* Uses OpenAI to generate both the summary and tags.
+* Saves results to both `summaries` and `transcripts` collections in Firestore.
+* Includes YouTube link and properly formatted frontmatter for markdown usage.
 
 ---
 

@@ -671,6 +671,21 @@ app.post('/smart-transcript', async (req, res) => {
   }
 });
 
+/**
+ * @route POST /smart-transcript-v2
+ * @description Fetches the transcript and basic metadata for a YouTube video and stores it in Firestore.
+ * @param {Object} req.body - The request payload.
+ * @param {string} req.body.url - The full YouTube video URL.
+ * @returns {Object} 200 - Returns stored transcript and metadata (title, duration, date, tags, etc.).
+ * @returns {Object} 404 - If no transcript is available for the video.
+ * @returns {Object} 500 - If an internal error occurs during processing.
+ *
+ * @example
+ * POST /smart-transcript-v2
+ * {
+ *   "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+ * }
+ */
 app.post('/smart-transcript-v2', async (req, res) => {
   try {
     const { url } = req.body;
@@ -966,6 +981,26 @@ app.post('/smart-summary-firebase', async (req, res) => {
   }
 });
 
+/**
+ * @route POST /smart-summary-firebase-v2
+ * @description Generates an AI-powered summary and tags for a YouTube video's transcript.
+ *              Uses existing transcript metadata from Firestore and enriches it with AI-generated content.
+ *              Stores the result (with YAML frontmatter) in the `summaries` collection and updates tags in `transcripts`.
+ * @param {Object} req.body - The request payload.
+ * @param {string} req.body.url - The full YouTube video URL.
+ * @param {string} req.body.model - The model key used to route to the correct OpenAI/Vercel endpoint.
+ * @returns {Object} 200 - Returns the formatted markdown summary with frontmatter.
+ * @returns {Object} 400 - If URL or model is missing or invalid.
+ * @returns {Object} 404 - If transcript data is missing.
+ * @returns {Object} 500 - If the model fails or an internal error occurs.
+ *
+ * @example
+ * POST /smart-summary-firebase-v2
+ * {
+ *   "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+ *   "model": "openai"
+ * }
+ */
 app.post('/smart-summary-firebase-v2', async (req, res) => {
   try {
     const { url, model } = req.body;
