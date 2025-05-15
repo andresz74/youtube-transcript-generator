@@ -1097,7 +1097,7 @@ author: ${metadata.author}
 
 app.post('/smart-summary-firebase-v3', async (req, res) => {
   try {
-    const { url, model, category } = req.body;
+    const { url, model } = req.body;
     if (!url) return res.status(400).json({ message: 'URL is required' });
 
     const videoId = ytdl.getURLVideoID(url);
