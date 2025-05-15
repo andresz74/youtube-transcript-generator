@@ -1151,7 +1151,7 @@ description: |
   ${metadata.description}
 image: '${metadata.image}
 duration: ${metadata.duration}
-tags: ${metadata.tags}
+tags: ${metadata.tags.map(tag => `  - ${tag}`).join('\n')}
 canonical_url: ${metadata.canonical_url}
 author: ${metadata.author}
 video_author: ${metadata.video_author}
