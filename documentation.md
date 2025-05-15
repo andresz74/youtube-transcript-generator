@@ -371,6 +371,41 @@ A debug endpoint that returns the IP address and region of the requestor.
 
 ---
 
+### 11. **POST `/smart-summary-firebase-v3`**
+
+This endpoint enhances `/smart-summary-firebase-v2` by retrieving rich metadata (e.g., category, video author, published date) from Firestore. It generates a structured summary using an external model endpoint and wraps the result in a Markdown document with YAML frontmatter. The summary is then cached in Firestore for future requests.
+
+#### **Request Body:**
+
+```json
+{
+  "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "model": "chatgpt"  // Or "anthropic", "deepseek", etc.
+}
+```
+
+- **`url`**: Full YouTube video URL.
+- **`model`**: AI model to use for summary generation.
+
+### **Response**
+
+```json
+{
+  "summary": "---\\ntitle: \\"...\\",\\ndate: ...\\ndescription: ...\\ntags: [...]\\n---\\nSummary content...",
+  "fromCache": false
+}
+```
+- **`summary`**: Full Markdown output with frontmatter.
+- **`fromCache`**: true if retrieved from Firestore, otherwise false.
+
+### **Highlights:**
+
+- Adds extended metadata to the summary frontmatter (e.g., video_author, published_date, video_id, etc.).
+- Sends only the videoId to the AI endpoint for summary generation.
+- Stores result in summaries collection in Firestore.
+
+---
+
 ## **Firebase Firestore Caching**
 
 The service uses Firebase Firestore to cache transcripts and summaries for YouTube videos. If a transcript or summary has already been processed for a video, it will be fetched from Firestore to avoid redundant processing.

@@ -1095,6 +1095,45 @@ author: ${metadata.author}
   }
 });
 
+/**
+ * @route POST /smart-summary-firebase-v3
+ * @description
+ * Handles summarization of a YouTube video's transcript using an external AI model.
+ * - Checks Firebase Firestore for a cached summary.
+ * - If not found, retrieves transcript metadata.
+ * - Sends a request to a model endpoint to generate the summary.
+ * - Constructs a full Markdown document with YAML frontmatter.
+ * - Saves the summary to the `summaries` Firestore collection.
+ * 
+ * @param {Object} req - Express request object.
+ * @param {Object} req.body - Request body.
+ * @param {string} req.body.url - Full YouTube video URL. Required.
+ * @param {string} req.body.model - Model name to use for summarization (e.g., "chatgpt", "anthropic"). Required.
+ * 
+ * @param {Object} res - Express response object.
+ * 
+ * @returns {Object} 200 - Success response with the generated summary:
+ * {
+ *   summary: string,        // Markdown content including YAML frontmatter
+ *   fromCache: boolean      // True if returned from Firebase cache, false if generated
+ * }
+ * 
+ * @returns {Object} 400 - If URL or model is missing or invalid:
+ * {
+ *   message: string
+ * }
+ * 
+ * @returns {Object} 404 - If no transcript was found for the given video:
+ * {
+ *   message: 'Transcript not found for this video.'
+ * }
+ * 
+ * @returns {Object} 500 - On internal errors or failed model response:
+ * {
+ *   message: string
+ * }
+ */
+
 app.post('/smart-summary-firebase-v3', async (req, res) => {
   try {
     const { url, model } = req.body;
@@ -1149,7 +1188,7 @@ date: ${metadata.date}
 category: ${metadata.category}
 description: |
   ${metadata.description}
-image: '${metadata.image}
+image: '${metadata.image}'
 duration: ${metadata.duration}
 tags: 
 ${metadata.tags.map(tag => `  - ${tag}`).join('\n')}
