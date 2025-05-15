@@ -1150,7 +1150,7 @@ description: |
   ${metadata.description}
 image: '${metadata.image}
 duration: ${metadata.duration}
-tags: ${tags}
+tags: ${metadata.tags}
 canonical_url: ${metadata.canonical_url}
 author: ${metadata.author}
 video_author: ${metadata.video_author}
