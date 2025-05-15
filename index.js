@@ -726,7 +726,7 @@ app.post('/smart-transcript-v2', async (req, res) => {
 
       // Metadata to save
       const title = videoInfo.videoDetails.title;
-      const description = videoInfo.videoDetails.description || '';
+      const description = videoInfo.videoDetails.description?.split('\n')[0] || '';
       const publishedAt = videoInfo.videoDetails.publishDate || new Date().toISOString().split('T')[0];
       const date = publishedAt;
       const image = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
@@ -1180,6 +1180,13 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     if (!summary) {
       return res.status(500).json({ message: 'Model did not return a summary' });
     }
+    const rawDescription = metadata.description;
+    const yamlSafeDescription = `|\n  ` + rawDescription
+  .replace(/\r\n/g, '\n')           // normalize Windows newlines
+  .split('\n')                      // split into lines
+  .map(line => line.trimEnd())     // trim end spaces
+  .map(line => `  ${line}`)        // indent for YAML block
+  .join('\n');                      // rejoin with newline
 
     // Construct frontmatter
     const frontmatter = `---
@@ -1187,7 +1194,7 @@ title: "${metadata.title}"
 date: ${metadata.date}
 category: ${metadata.category}
 description: |
-  ${metadata.description}
+  ${yamlSafeDescription}
 image: '${metadata.image}'
 duration: ${metadata.duration}
 tags: 
