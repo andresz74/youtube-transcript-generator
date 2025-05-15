@@ -724,36 +724,34 @@ app.post('/smart-transcript-v2', async (req, res) => {
 
       const transcriptText = transcript.map(item => item.text).join(' ');
 
-      // 🆕 Metadata to save
+      // Metadata to save
       const title = videoInfo.videoDetails.title;
       const description = videoInfo.videoDetails.description?.split('\n')[0] || '';
       const publishedAt = videoInfo.videoDetails.publishDate || new Date().toISOString().split('T')[0];
       const date = publishedAt;
       const image = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
-
-      // Naive tag inference (improve later)
-      const tags = Array.from(
-        new Set(
-          title
-            .toLowerCase()
-            .match(/\b\w+\b/g)
-            .filter(word => ['iphone', 'shortcut', 'automation', 'tech', 'apple', 'ios', 'productivity'].includes(word))
-        )
-      );
-
+      const tags = videoInfo.videoDetails.keywords || [];
       const canonical_url = `https://blog.andreszenteno.com/notes/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+      const video_author = videoInfo.videoDetails.author.name;
+      const video_url = videoInfo.videoDetails.video_url;
+      const category = videoInfo.videoDetails.category;
+      const published_date = videoInfo.videoDetails.publishDate;
 
-      // 📝 Save all metadata + transcript
+      // Save all metadata + transcript
       await docRef.set({
         videoId,
+        video_author,
+        video_url,
+        category,
+        published_date,
         title,
         description,
+        duration,
         date,
         image,
         tags,
         canonical_url,
-        author: 'Andres Zenteno',
-        duration,
+        author: video_author || 'Andres Zenteno',
         transcript: transcriptText,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
@@ -762,14 +760,19 @@ app.post('/smart-transcript-v2', async (req, res) => {
 
       res.json({
         videoId,
+        video_author,
+        video_url,
+        category,
+        published_date,
         title,
-        duration,
-        transcript: transcriptText,
         description,
+        duration,
         date,
         image,
         tags,
         canonical_url,
+        author: video_author || 'Andres Zenteno',
+        transcript: transcriptText,
       });
 
     } catch (transcriptError) {
@@ -1088,6 +1091,134 @@ author: ${metadata.author}
 
   } catch (err) {
     console.error('Error in /smart-summary-firebase-v2:', err);
+    res.status(500).json({ message: 'Error generating smart summary' });
+  }
+});
+
+/**
+ * @route POST /smart-summary-firebase-v3
+ * @description
+ * Handles summarization of a YouTube video's transcript using an external AI model.
+ * - Checks Firebase Firestore for a cached summary.
+ * - If not found, retrieves transcript metadata.
+ * - Sends a request to a model endpoint to generate the summary.
+ * - Constructs a full Markdown document with YAML frontmatter.
+ * - Saves the summary to the `summaries` Firestore collection.
+ * 
+ * @param {Object} req - Express request object.
+ * @param {Object} req.body - Request body.
+ * @param {string} req.body.url - Full YouTube video URL. Required.
+ * @param {string} req.body.model - Model name to use for summarization (e.g., "chatgpt", "anthropic"). Required.
+ * 
+ * @param {Object} res - Express response object.
+ * 
+ * @returns {Object} 200 - Success response with the generated summary:
+ * {
+ *   summary: string,        // Markdown content including YAML frontmatter
+ *   fromCache: boolean      // True if returned from Firebase cache, false if generated
+ * }
+ * 
+ * @returns {Object} 400 - If URL or model is missing or invalid:
+ * {
+ *   message: string
+ * }
+ * 
+ * @returns {Object} 404 - If no transcript was found for the given video:
+ * {
+ *   message: 'Transcript not found for this video.'
+ * }
+ * 
+ * @returns {Object} 500 - On internal errors or failed model response:
+ * {
+ *   message: string
+ * }
+ */
+
+app.post('/smart-summary-firebase-v3', async (req, res) => {
+  try {
+    const { url, model } = req.body;
+    if (!url) return res.status(400).json({ message: 'URL is required' });
+
+    const videoId = ytdl.getURLVideoID(url);
+    const db = admin.firestore();
+    const summariesRef = db.collection('summaries').doc(videoId);
+    const transcriptRef = db.collection('transcripts').doc(videoId);
+
+    // Check if summary already exists
+    const summarySnap = await summariesRef.get();
+    if (summarySnap.exists) {
+      const data = summarySnap.data();
+      if (data.summary) {
+        console.log(`Summary found in Firebase for ${videoId}`);
+        return res.json({ summary: data.summary, fromCache: true });
+      }
+    }
+
+    // Get metadata from transcript doc
+    const transcriptSnap = await transcriptRef.get();
+    if (!transcriptSnap.exists) {
+      return res.status(404).json({ message: 'Transcript not found for this video.' });
+    }
+
+    const metadata = transcriptSnap.data();
+    console.log('Transcript Metadata:', metadata);
+
+    // Ensure model is valid
+    const modelUrl = modelUrls[model];
+    if (!modelUrl) {
+      return res.status(400).json({ message: 'Invalid model specified' });
+    }
+
+    // 🧠 Call your deployed endpoint that returns the summary
+    const response = await axios.post(modelUrl, {
+      videoId,
+    });
+    console.log('Response from model:', response.data);
+
+    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
+
+    if (!summary) {
+      return res.status(500).json({ message: 'Model did not return a summary' });
+    }
+
+    // Construct frontmatter
+    const frontmatter = `---
+title: "${metadata.title}"
+date: ${metadata.date}
+category: ${metadata.category}
+description: |
+  ${metadata.description}
+image: '${metadata.image}'
+duration: ${metadata.duration}
+tags: 
+${metadata.tags.map(tag => `  - ${tag}`).join('\n')}
+canonical_url: ${metadata.canonical_url}
+author: ${metadata.author}
+video_author: ${metadata.video_author}
+video_url: ${metadata.video_url}
+video_id: ${videoId}
+published_date: ${metadata.published_date}
+---
+![](https://www.youtube.com/watch?v=${videoId})
+# ${metadata.title}\n`;
+
+    const summaryWithFrontmatter = `${frontmatter}${summary}`;
+
+    // Save the summary to summaries collection
+    console.log(`Summary stored in Firebase for ${videoId}`);
+    await summariesRef.set(
+      {
+        summary: summaryWithFrontmatter,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        tags: metadata.tags,
+      },
+      { merge: true }
+    );
+
+    res.json({ summary: summaryWithFrontmatter, fromCache: false });
+
+  } catch (err) {
+    console.error('Error in /smart-summary-firebase-v3:', err);
     res.status(500).json({ message: 'Error generating smart summary' });
   }
 });

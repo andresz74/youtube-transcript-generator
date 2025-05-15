@@ -324,6 +324,29 @@ Generates a markdown-formatted AI summary with frontmatter and tags. Caches both
 
 ---
 
+### 🧠 POST `/smart-summary-firebase-v3`
+
+This endpoint improves upon v2 by retrieving extended video metadata from Firestore (such as category, video author, publish date) and formatting the summary as a Markdown document with a full YAML frontmatter block. The summary is cached in Firestore to avoid redundant AI calls.
+
+**Request:**
+
+```json
+{
+  "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "model": "chatgpt" // or "anthropic", "deepseek", etc.
+}
+```
+
+**Response**
+
+```json
+{
+  "summary": "---\\ntitle: \\"...\\",\\ndate: ...\\ndescription: ...\\n...\\n---\\nSummary content...",
+  "fromCache": false
+}
+```
+---
+
 ## PM2 Notes
 
 To start the server with PM2:
