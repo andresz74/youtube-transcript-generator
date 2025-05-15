@@ -1122,6 +1122,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     }
 
     const metadata = transcriptSnap.data();
+    console.log('Transcript Metadata:', metadata);
 
     // Ensure model is valid
     const modelUrl = modelUrls[model];
@@ -1169,7 +1170,7 @@ published_date: ${metadata.published_date}
       {
         summary: summaryWithFrontmatter,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        tags,
+        tags: metadata.tags,
       },
       { merge: true }
     );
