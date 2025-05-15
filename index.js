@@ -1133,10 +1133,11 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     const response = await axios.post(modelUrl, {
       videoId,
     });
+    console.log('Response from model:', response.data);
 
-    const plainSummary = response.data.summary?.choices?.[0]?.message?.content;
+    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
 
-    if (!plainSummary) {
+    if (!summary) {
       return res.status(500).json({ message: 'Model did not return a summary' });
     }
 
@@ -1160,9 +1161,10 @@ published_date: ${metadata.published_date}
 ![](https://www.youtube.com/watch?v=${videoId})
 # ${metadata.title}\n`;
 
-    const summaryWithFrontmatter = `${frontmatter}${plainSummary}`;
+    const summaryWithFrontmatter = `${frontmatter}${summary}`;
 
     // Save the summary to summaries collection
+    console.log(`Summary stored in Firebase for ${videoId}`);
     await summariesRef.set(
       {
         summary: summaryWithFrontmatter,
@@ -1171,16 +1173,6 @@ published_date: ${metadata.published_date}
       },
       { merge: true }
     );
-
-    // ✅ Update the tags in transcripts collection as well
-    await transcriptRef.set(
-      {
-        tags,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-
 
     res.json({ summary: summaryWithFrontmatter, fromCache: false });
 
