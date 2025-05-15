@@ -1145,7 +1145,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     const frontmatter = `---
 title: "${metadata.title}"
 date: ${metadata.date}
-category: ${category}
+category: ${metadata.category}
 description: |
   ${metadata.description}
 image: '${metadata.image}
@@ -1177,7 +1177,7 @@ published_date: ${metadata.published_date}
     res.json({ summary: summaryWithFrontmatter, fromCache: false });
 
   } catch (err) {
-    console.error('Error in /smart-summary-firebase-v2:', err);
+    console.error('Error in /smart-summary-firebase-v3:', err);
     res.status(500).json({ message: 'Error generating smart summary' });
   }
 });
