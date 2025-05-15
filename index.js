@@ -1181,7 +1181,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
       return res.status(500).json({ message: 'Model did not return a summary' });
     }
     const rawDescription = metadata.description;
-    const yamlSafeDescription = `|\n  ` + rawDescription
+    const yamlSafeDescription = rawDescription
   .replace(/\r\n/g, '\n')           // normalize Windows newlines
   .split('\n')                      // split into lines
   .map(line => line.trimEnd())     // trim end spaces
