@@ -1181,12 +1181,11 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
       return res.status(500).json({ message: 'Model did not return a summary' });
     }
     const rawDescription = metadata.description;
-    const yamlSafeDescription = `|\n  ` + rawDescription
-  .replace(/\r\n/g, '\n')           // normalize Windows newlines
-  .split('\n')                      // split into lines
-  .map(line => line.trimEnd())     // trim end spaces
-  .map(line => `  ${line}`)        // indent for YAML block
-  .join('\n');                     // rejoin with newline
+    const yamlSafeDescription = '|\n' + rawDescription
+  .replace(/\r\n/g, '\n') // Normalize Windows newlines
+  .split('\n')
+  .map(line => `  ${line}`) // indent all lines exactly 2 spaces
+  .join('\n');
 
     // Construct frontmatter
     const frontmatter = `---
