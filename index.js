@@ -387,6 +387,17 @@ app.post('/simple-transcript-v2', async (req, res) => {
  *   500: An error occurred while fetching or saving the transcript.
  */
 
+async function safeGetVideoInfo(url) {
+  try {
+    return await ytdl.getBasicInfo(url);
+  } catch (err) {
+    if (err.message.includes('private video')) {
+      return null; // signal to caller
+    }
+    throw err;
+  }
+}
+
 app.post('/simple-transcript-v3', async (req, res) => {
   try {
     const { url, lang } = req.body;
@@ -439,7 +450,11 @@ app.post('/simple-transcript-v3', async (req, res) => {
       }
 
       // 🚨 Lang requested and NOT cached → FETCH FROM YOUTUBE
-      const videoInfo = await ytdl.getBasicInfo(url);
+      const videoInfo = await safeGetVideoInfo(url);
+      if (!videoInfo) {
+        return res.status(403).json({ message: 'This is a private video. Cannot fetch transcript.' });
+      }
+
       const transcriptText = await getSubtitles({ videoID: videoId, lang });
       const transcriptTextJoined = transcriptText.map(item => item.text).join(' ');
 
@@ -473,7 +488,12 @@ app.post('/simple-transcript-v3', async (req, res) => {
     // ------------------------------
     // No cached transcript → fetch video info and captions
     // ------------------------------
-    const videoInfo = await ytdl.getBasicInfo(url);
+    const videoInfo = await safeGetVideoInfo(url);
+    if (!videoInfo) {
+      return res.status(403).json({ message: 'This is a private video. Cannot fetch transcript.' });
+    }
+
+
     const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
     const captionTracks = videoInfo.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
@@ -1182,10 +1202,10 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     }
     const rawDescription = metadata.description;
     const yamlSafeDescription = '|\n' + rawDescription
-  .replace(/\r\n/g, '\n') // Normalize Windows newlines
-  .split('\n')
-  .map(line => `  ${line}`) // indent all lines exactly 2 spaces
-  .join('\n');
+      .replace(/\r\n/g, '\n') // Normalize Windows newlines
+      .split('\n')
+      .map(line => `  ${line}`) // indent all lines exactly 2 spaces
+      .join('\n');
 
     // Construct frontmatter
     const frontmatter = `---
