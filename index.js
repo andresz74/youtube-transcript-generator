@@ -72,8 +72,8 @@ function parseTranscriptXml(xml) {
     .filter(line => line.trim())
     .map(line => {
       const start = line.match(/start="([\d.]+)"/)[1];
-      const dur   = line.match(/dur="([\d.]+)"/)[1];
-      let   txt   = line.replace(/<text.+?>/, '').replace(/<\/?[^>]+(>|$)/g, '');
+      const dur = line.match(/dur="([\d.]+)"/)[1];
+      let txt = line.replace(/<text.+?>/, '').replace(/<\/?[^>]+(>|$)/g, '');
       txt = he.decode(txt.replace(/&amp;/g, '&'));
       return { start, dur, text: txt };
     });
@@ -86,7 +86,7 @@ async function fetchTranscript(videoId, language) {
     if (!raw.length) throw new Error('empty');
     return raw.map(({ text, start, duration }) => ({ text, start, dur: duration }));
   } catch (err) {
-    const msg = (err.message||'').toLowerCase();
+    const msg = (err.message || '').toLowerCase();
     if (!/video unavailable|captions disabled|empty/.test(msg)) {
       // some other error (network, bad ID)… re-throw
       throw err;
@@ -110,9 +110,9 @@ async function fetchTranscript(videoId, language) {
   // fetch with browser-like headers
   const { data: xml } = await axios.get(url, {
     headers: {
-      'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
       'Accept-Language': 'en-US,en;q=0.9',
-      'Referer':         'https://www.youtube.com/',
+      'Referer': 'https://www.youtube.com/',
     }
   });
   console.log('Manual scrape URL:', url);
@@ -780,10 +780,10 @@ app.post('/smart-transcript-v2', async (req, res) => {
   try {
     const { url } = req.body;
     const videoId = ytdl.getURLVideoID(url);
+    console.log('>>> videoID', videoId);
 
     const docRef = db.collection('transcripts').doc(videoId);
     const doc = await docRef.get();
-
     if (doc.exists) {
       console.log(`Transcript found in Firebase for ${videoId}`);
       return res.json(doc.data());
@@ -791,80 +791,79 @@ app.post('/smart-transcript-v2', async (req, res) => {
 
     const videoInfo = await ytdl.getBasicInfo(url);
     const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
-
     const playerResponse = videoInfo.player_response;
-    if (!playerResponse || !playerResponse.captions || !playerResponse.captions.playerCaptionsTracklistRenderer) {
-      return res.status(404).json({ message: 'No captions available for this video.' });
-    }
 
-    const captionTracks = playerResponse.captions.playerCaptionsTracklistRenderer.captionTracks;
-    if (!captionTracks || captionTracks.length === 0) {
-      return res.status(404).json({ message: 'No captions available for this video.' });
-    }
+    const captionTracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    const languageCode = captionTracks[0]?.languageCode;
 
-    const languageCode = captionTracks[0].languageCode;
-
+    let transcript = '';
     try {
-      // lines is your array of { start, dur, text }
-      const lines = await fetchTranscript(videoId, languageCode);
-      // build a single string
-      const transcript = lines.map(item => item.text).join(' ');
-
-      // Metadata to save
-      const title = videoInfo.videoDetails.title;
-      const description = videoInfo.videoDetails.description;
-      const publishedAt = videoInfo.videoDetails.publishDate || new Date().toISOString().split('T')[0];
-      const date = publishedAt;
-      const image = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
-      const tags = videoInfo.videoDetails.keywords || [];
-      const canonical_url = `https://blog.andreszenteno.com/notes/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
-      const video_author = videoInfo.videoDetails.author.name;
-      const video_url = videoInfo.videoDetails.video_url;
-      const category = videoInfo.videoDetails.category;
-      const published_date = videoInfo.videoDetails.publishDate;
-
-      // Save all metadata + transcript
-      await docRef.set({
-        videoId,
-        video_author,
-        video_url,
-        category,
-        published_date,
-        title,
-        description,
-        duration,
-        date,
-        image,
-        tags,
-        canonical_url,
-        author: video_author || 'Andres Zenteno',
-        transcript,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      console.log(`Full transcript and metadata stored in Firebase for ${videoId}`);
-
-      res.json({
-        videoId,
-        video_author,
-        video_url,
-        category,
-        published_date,
-        title,
-        description,
-        duration,
-        date,
-        image,
-        tags,
-        canonical_url,
-        author: video_author || 'Andres Zenteno',
-        transcript,
-      });
-
+      if (languageCode) {
+        const lines = await fetchTranscript(videoId, languageCode);
+        transcript = lines.map(item => item.text).join(' ');
+      } else {
+        console.warn('No caption language available.');
+      }
     } catch (transcriptError) {
-      console.error('Error fetching transcript:', transcriptError.message);
-      res.status(404).json({ message: 'No transcript found for this video.' });
+      console.warn('Transcript fetch failed:', transcriptError.message);
     }
+
+    // Metadata to save
+    const title = videoInfo.videoDetails.title;
+    const description = videoInfo.videoDetails.description;
+    const publishedAt = videoInfo.videoDetails.publishDate || new Date().toISOString().split('T')[0];
+    const image = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
+    const tags = videoInfo.videoDetails.keywords || [];
+    const canonical_url = `https://blog.andreszenteno.com/notes/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+    const video_author = videoInfo.videoDetails.author.name;
+    const video_url = videoInfo.videoDetails.video_url;
+    const category = videoInfo.videoDetails.category;
+    const published_date = videoInfo.videoDetails.publishDate;
+
+    // Save to Firestore
+    await docRef.set({
+      videoId,
+      video_author,
+      video_url,
+      category,
+      published_date,
+      title,
+      description,
+      duration,
+      date: publishedAt,
+      image,
+      tags,
+      canonical_url,
+      author: video_author || 'Andres Zenteno',
+      transcript,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log(`Metadata${transcript ? ' + transcript' : ''} stored in Firebase for ${videoId}`);
+
+    const responsePayload = {
+      videoId,
+      video_author,
+      video_url,
+      category,
+      published_date,
+      title,
+      description,
+      duration,
+      date: publishedAt,
+      image,
+      tags,
+      canonical_url,
+      author: video_author || 'Andres Zenteno',
+      transcript,
+    };
+
+    if (transcript) {
+      res.json(responsePayload);
+    } else {
+      res.status(404).json({ ...responsePayload, message: 'No transcript found, but metadata saved.' });
+    }
+
   } catch (error) {
     console.error('Error fetching/storing transcript:', error);
     res.status(500).json({ message: 'An error occurred while processing the transcript.' });
