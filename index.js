@@ -7,6 +7,7 @@ const logger = require('./logger');
 const ytdl = require('ytdl-core');
 const getSubtitles = require('youtube-captions-scraper').getSubtitles;
 const TranscriptAPI = require('youtube-transcript-api');
+const he = require('he');
 
 // Firebase Admin SDK
 const admin = require('firebase-admin');
