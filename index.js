@@ -79,10 +79,10 @@ function parseTranscriptXml(xml) {
     });
 }
 
-async function fetchTranscript(videoId, language) {
+async function fetchTranscript(videoID, language) {
   // 1) first, try the easy library
   try {
-    const raw = await TranscriptAPI.getTranscript(videoId, language);
+    const raw = await TranscriptAPI.getTranscript(videoID, language);
     if (!raw.length) throw new Error('empty');
     return raw.map(({ text, start, duration }) => ({ text, start, dur: duration }));
   } catch (err) {
@@ -96,7 +96,7 @@ async function fetchTranscript(videoId, language) {
 
   // 2) fallback: scrape YouTube’s signed URL yourself
   console.log('>>> fallback');
-  const info = await ytdl.getBasicInfo(`https://youtube.com/watch?v=${videoId}`);
+  const info = await ytdl.getBasicInfo(`https://youtube.com/watch?v=${videoID}`);
   const tracks = info.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
   if (!tracks.length) {
     throw new Error('No captionTracks available to scrape.');
@@ -147,8 +147,8 @@ app.post('/transcript', async (req, res) => {
     console.log('isShort:', isShort);
 
     // Extract video ID from URL
-    const videoId = ytdl.getURLVideoID(url);
-    if (!videoId) {
+    const videoID = ytdl.getURLVideoID(url);
+    if (!videoID) {
       return res.status(400).json({ message: 'Invalid YouTube URL' });
     }
 
@@ -179,10 +179,8 @@ app.post('/transcript', async (req, res) => {
     const languageCode = captionTracks[0].languageCode;
 
     // Fetch the transcript in the selected language
-    const transcript = await getSubtitles({
-      videoID: videoId, // YouTube video ID
-      lang: languageCode // Use the language code of the first available caption
-    });
+    // lines is your array of { start, dur, text }
+    const lines = await fetchTranscript(videoID, languageCode);
 
     // Prepare the response in the desired format
     const response = {
@@ -191,14 +189,14 @@ app.post('/transcript', async (req, res) => {
       code: 100000,
       message: 'success',
       data: {
-        videoId: videoId,
+        videoID: videoID,
         videoInfo: videoInfo,
         videoInfoSummary: {
           name: videoInfo.videoDetails.title,
           thumbnailUrl: {
             hqdefault: videoInfo.videoDetails.thumbnails[0].url,
           },
-          embedUrl: `https://www.youtube.com/embed/${videoId}`,
+          embedUrl: `https://www.youtube.com/embed/${videoID}`,
           duration: videoInfo.videoDetails.lengthSeconds,
           description: videoInfo.videoDetails.description,
           upload_date: videoInfo.videoDetails.publishDate,
@@ -213,7 +211,7 @@ app.post('/transcript', async (req, res) => {
         transcripts: captionTracks.reduce((acc, caption) => {
           // Only retrieve transcripts for available languages
           acc[caption.languageCode] = {
-            custom: transcript.map((item) => ({
+            custom: lines.map((item) => ({
               start: item.start,
               end: item.start + item.dur,
               text: item.text
@@ -248,7 +246,7 @@ app.post('/simple-transcript', async (req, res) => {
     const { url } = req.body;
 
     // Extract video ID from URL
-    const videoId = ytdl.getURLVideoID(url);
+    const videoID = ytdl.getURLVideoID(url);
 
     // Get video info (e.g., duration)
     const videoInfo = await ytdl.getBasicInfo(url);
@@ -266,17 +264,14 @@ app.post('/simple-transcript', async (req, res) => {
     const languageCode = captionTracks[0].languageCode;
 
     // Fetch the transcript in the selected language
-    const transcript = await getSubtitles({
-      videoID: videoId,
-      lang: languageCode // Use the language code of the first available caption
-    });
+    const lines = await fetchTranscript(videoID, languageCode);
 
-    if (!transcript || transcript.length === 0) {
+    if (!lines || lines.length === 0) {
       throw new Error(`No captions available in the selected language (${languageCode}).`);
     }
 
     // Combine all transcript items into a single string
-    const transcriptText = transcript.map(item => item.text).join(' ');
+    const transcriptText = lines.map(item => item.text).join(' ');
 
     // Prepare the simple response format
     const response = {
@@ -293,6 +288,46 @@ app.post('/simple-transcript', async (req, res) => {
   }
 });
 
+/**
+ * POST /simple-transcript-v2
+ * Fetches and returns the video metadata and concatenated transcript, prioritizing English transcripts
+ * when available (or a requested language if specified). Includes comprehensive video information.
+ * 
+ * Request Body:
+ *   url (string): The URL of the YouTube video (required).
+ *   lang (string, optional): The preferred language code for the transcript (e.g., "en", "es", "fr-CA").
+ * 
+ * Response:
+ *   200: JSON object containing:
+ *     - duration (number): Video duration in minutes.
+ *     - title (string): Video title.
+ *     - transcript (string): Concatenated transcript text.
+ *     - transcriptLanguageCode (string): Language code of returned transcript.
+ *     - languages (array, optional): Available caption languages (format: {name: string, code: string}).
+ *     - videoInfoSummary (object): Detailed video metadata including:
+ *       - author (string): Channel/uploader name.
+ *       - description (string): Video description.
+ *       - embed (object): Embeddable player info.
+ *       - thumbnails (array): Video thumbnail URLs in various resolutions.
+ *       - viewCount (string): Formatted view count.
+ *       - publishDate (string): ISO 8601 publish date.
+ *       - video_url (string): Canonical video URL.
+ * 
+ *   404: JSON object with error message when:
+ *     - No captions exist for the video.
+ *     - Requested language is unavailable.
+ * 
+ *   500: JSON object with error message when:
+ *     - URL parsing fails.
+ *     - YouTube API request fails.
+ *     - Transcript processing fails.
+ * 
+ * Notes:
+ *   - Auto-detects YouTube Shorts format.
+ *   - Prioritizes non-auto-generated English captions when no language specified.
+ *   - Falls back to first available language if preferred language unavailable.
+ */
+
 app.post('/simple-transcript-v2', async (req, res) => {
   try {
     const { url, lang } = req.body;
@@ -302,7 +337,7 @@ app.post('/simple-transcript-v2', async (req, res) => {
     console.log('isShort:', isShort);
 
     // Extract video ID from URL
-    const videoId = ytdl.getURLVideoID(url);
+    const videoID = ytdl.getURLVideoID(url);
 
     // Get video info (e.g., duration)
     const videoInfo = await ytdl.getBasicInfo(url);
@@ -326,15 +361,12 @@ app.post('/simple-transcript-v2', async (req, res) => {
         return res.status(404).json({ message: `No captions available in the requested language (${lang}).` });
       } else {
         // Fetch the transcript in the requested language
-        const transcript = await getSubtitles({
-          videoID: videoId,
-          lang: lang // Use the requested language code
-        });
-        if (!transcript || transcript.length === 0) {
+        const lines = await fetchTranscript(videoID, languageCode);
+        if (!lines || lines.length === 0) {
           throw new Error(`No captions available in the requested language (${lang}).`);
         }
-        // Combine all transcript items into a single string
-        const transcriptText = transcript.map(item => item.text).join(' ');
+        // Combine all lines items into a single string
+        const transcriptText = lines.map(item => item.text).join(' ');
         // Prepare the simple response format
         const response = {
           duration: duration,
@@ -374,7 +406,7 @@ app.post('/simple-transcript-v2', async (req, res) => {
       transcriptLanguageCode = englishTrack.languageCode;
       // Fetch the transcript in English if available
       const transcript = await getSubtitles({
-        videoID: videoId,
+        videoID: videoID,
         lang: 'en' // Fetch English captions
       });
 
@@ -390,7 +422,7 @@ app.post('/simple-transcript-v2', async (req, res) => {
       const firstLanguageCode = firstAvailableTrack.languageCode;
 
       const transcript = await getSubtitles({
-        videoID: videoId,
+        videoID: videoID,
         lang: firstLanguageCode // Fetch captions in the first available language
       });
 
@@ -467,15 +499,15 @@ app.post('/simple-transcript-v3', async (req, res) => {
     const { url, lang } = req.body;
     console.log('URL:', url, ', Language:', lang);
 
-    const videoId = ytdl.getURLVideoID(url);
-    const docRef = db.collection('transcripts-multilingual').doc(videoId);
+    const videoID = ytdl.getURLVideoID(url);
+    const docRef = db.collection('transcripts-multilingual').doc(videoID);
     const doc = await docRef.get();
 
     // ------------------------------
     // If cached transcript exists → use it
     // ------------------------------
     if (doc.exists) {
-      console.log(`Transcript found in Firebase for ${videoId}`);
+      console.log(`Transcript found in Firebase for ${videoID}`);
       const cached = doc.data();
       const availableLanguages = cached.availableLanguages;
 
@@ -519,13 +551,16 @@ app.post('/simple-transcript-v3', async (req, res) => {
         return res.status(403).json({ message: 'This is a private video. Cannot fetch transcript.' });
       }
 
-      // const transcriptText = await getSubtitles({ videoID: videoId, lang });
+      // const transcriptText = await getSubtitles({ videoID: videoID, lang });
       // lines is your array of { start, dur, text }
-      const lines = await fetchTranscript(videoId, selectedLanguageCode);
+      const lines = await fetchTranscript(videoID, selectedLanguageCode);
+
+      if (!lines || lines.length === 0) {
+        throw new Error(`No captions available in the selected language (${selectedLanguageCode}).`);
+      }
 
       // build a single string
       const transcriptTextJoined = lines.map(item => item.text).join(' ');
-      console.log('>>> 1 fetchTranscript');
 
       // Update transcript array
       const transcriptArray = cached.transcript;
@@ -594,7 +629,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
       selectedLanguageCode = lang;
       // lines is your array of { start, dur, text }
-      const lines = await fetchTranscript(videoId, selectedLanguageCode);
+      const lines = await fetchTranscript(videoID, selectedLanguageCode);
       // build a single string
       selectedTranscriptText = lines.map(item => item.text).join(' ');
 
@@ -605,7 +640,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
       selectedLanguageCode = preferredTrack.languageCode;
       // lines is your array of { start, dur, text }
-      const lines = await fetchTranscript(videoId, selectedLanguageCode);
+      const lines = await fetchTranscript(videoID, selectedLanguageCode);
       // build a single string
       selectedTranscriptText = lines.map(item => item.text).join(' ');
     }
@@ -635,20 +670,20 @@ app.post('/simple-transcript-v3', async (req, res) => {
     // Save everything to Firestore
     // ------------------------------
     await docRef.set({
-      videoID: videoId,
+      videoID: videoID,
       duration: duration,
       transcript: transcriptArray,
       availableLanguages: availableLanguages,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    console.log(`Transcript saved to Firebase for ${videoId}`);
+    console.log(`Transcript saved to Firebase for ${videoID}`);
 
     // ------------------------------
     // Return response
     // ------------------------------
     res.json({
-      videoID: videoId,
+      videoID: videoID,
       duration: duration,
       title: videoInfo.videoDetails.title,
       transcript: selectedTranscriptText,
@@ -686,14 +721,14 @@ app.post('/simple-transcript-v3', async (req, res) => {
 app.post('/smart-transcript', async (req, res) => {
   try {
     const { url } = req.body;
-    const videoId = ytdl.getURLVideoID(url);
+    const videoID = ytdl.getURLVideoID(url);
 
     // Check if transcript already exists in Firestore
-    const docRef = db.collection('transcripts').doc(videoId);
+    const docRef = db.collection('transcripts').doc(videoID);
     const doc = await docRef.get();
 
     if (doc.exists) {
-      console.log(`Transcript found in Firebase for ${videoId}`);
+      console.log(`Transcript found in Firebase for ${videoID}`);
       return res.json(doc.data());
     }
 
@@ -724,7 +759,7 @@ app.post('/smart-transcript', async (req, res) => {
 
     // Fetch the transcript
     try {
-      const transcript = await getSubtitles({ videoID: videoId, lang: languageCode });
+      const transcript = await getSubtitles({ videoID: videoID, lang: languageCode });
       if (!transcript || transcript.length === 0) {
         throw new Error('No English captions available for this video.');
       }
@@ -734,18 +769,18 @@ app.post('/smart-transcript', async (req, res) => {
 
       // Store the transcript in Firestore
       await docRef.set({
-        videoId,
+        videoID,
         title: videoInfo.videoDetails.title,
         duration,
         transcript: transcriptText,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      console.log(`Full transcript stored in Firebase for ${videoId}`);
+      console.log(`Full transcript stored in Firebase for ${videoID}`);
 
       // Return the transcript
       res.json({
-        videoId,
+        videoID,
         title: videoInfo.videoDetails.title,
         duration,
         transcript: transcriptText,
@@ -779,13 +814,13 @@ app.post('/smart-transcript', async (req, res) => {
 app.post('/smart-transcript-v2', async (req, res) => {
   try {
     const { url } = req.body;
-    const videoId = ytdl.getURLVideoID(url);
-    console.log('>>> videoID', videoId);
+    const videoID = ytdl.getURLVideoID(url);
+    console.log('>>> videoID', videoID);
 
-    const docRef = db.collection('transcripts').doc(videoId);
+    const docRef = db.collection('transcripts').doc(videoID);
     const doc = await docRef.get();
     if (doc.exists) {
-      console.log(`Transcript found in Firebase for ${videoId}`);
+      console.log(`Transcript found in Firebase for ${videoID}`);
       return res.json(doc.data());
     }
 
@@ -799,7 +834,7 @@ app.post('/smart-transcript-v2', async (req, res) => {
     let transcript = '';
     try {
       if (languageCode) {
-        const lines = await fetchTranscript(videoId, languageCode);
+        const lines = await fetchTranscript(videoID, languageCode);
         transcript = lines.map(item => item.text).join(' ');
       } else {
         console.warn('No caption language available.');
@@ -812,7 +847,7 @@ app.post('/smart-transcript-v2', async (req, res) => {
     const title = videoInfo.videoDetails.title;
     const description = videoInfo.videoDetails.description;
     const publishedAt = videoInfo.videoDetails.publishDate || new Date().toISOString().split('T')[0];
-    const image = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
+    const image = `https://i.ytimg.com/vi/${videoID}/maxresdefault.jpg`;
     const tags = videoInfo.videoDetails.keywords || [];
     const canonical_url = `https://blog.andreszenteno.com/notes/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
     const video_author = videoInfo.videoDetails.author.name;
@@ -822,7 +857,7 @@ app.post('/smart-transcript-v2', async (req, res) => {
 
     // Save to Firestore
     await docRef.set({
-      videoId,
+      videoID,
       video_author,
       video_url,
       category,
@@ -839,10 +874,10 @@ app.post('/smart-transcript-v2', async (req, res) => {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    console.log(`Metadata${transcript ? ' + transcript' : ''} stored in Firebase for ${videoId}`);
+    console.log(`Metadata${transcript ? ' + transcript' : ''} stored in Firebase for ${videoID}`);
 
     const responsePayload = {
-      videoId,
+      videoID,
       video_author,
       video_url,
       category,
@@ -902,15 +937,15 @@ app.post('/smart-summary', async (req, res) => {
     if (!url) return res.status(400).json({ message: 'URL is required' });
     console.log('URL:', url, ', Model:', model);
 
-    const videoId = ytdl.getURLVideoID(url);
+    const videoID = ytdl.getURLVideoID(url);
 
     // Initialize Firestore if not already
     const db = admin.firestore();
-    const docRef = db.collection('summaries').doc(videoId);
+    const docRef = db.collection('summaries').doc(videoID);
     const docSnap = await docRef.get();
 
     if (docSnap.exists) {
-      console.log(`Summary found in Firebase for ${videoId}`);
+      console.log(`Summary found in Firebase for ${videoID}`);
       const data = docSnap.data();
       if (data.summary) {
         return res.json({ summary: data.summary, fromCache: true });
@@ -922,7 +957,7 @@ app.post('/smart-summary', async (req, res) => {
 
     if (!rawTranscript) {
       const fetchedTranscript = await getSubtitles({
-        videoID: videoId,
+        videoID: videoID,
         lang: 'en',
       });
       rawTranscript = fetchedTranscript.map((item) => item.text).join(' ');
@@ -984,7 +1019,7 @@ app.post('/smart-summary', async (req, res) => {
     const summary = openaiResponse.data.choices?.[0]?.message?.content;
 
     if (summary) {
-      console.log(`Summary stored in Firebase for ${videoId}`);
+      console.log(`Summary stored in Firebase for ${videoID}`);
       await docRef.set(
         {
           summary,
@@ -1022,15 +1057,15 @@ app.post('/smart-summary-firebase', async (req, res) => {
     if (!url) return res.status(400).json({ message: 'URL is required' });
     console.log('URL:', url, ', Model:', model);
 
-    const videoId = ytdl.getURLVideoID(url);
+    const videoID = ytdl.getURLVideoID(url);
 
     // Initialize Firestore if not already
     const db = admin.firestore();
-    const docRef = db.collection('summaries').doc(videoId);
+    const docRef = db.collection('summaries').doc(videoID);
     const docSnap = await docRef.get();
 
     if (docSnap.exists) {
-      console.log(`Summary found in Firebase for ${videoId}`);
+      console.log(`Summary found in Firebase for ${videoID}`);
       const data = docSnap.data();
       if (data.summary) {
         return res.json({ summary: data.summary, fromCache: true });
@@ -1045,14 +1080,14 @@ app.post('/smart-summary-firebase', async (req, res) => {
     }
 
     const response = await axios.post(modelUrl, {
-      videoId  // Only send the video ID
+      videoID  // Only send the video ID
     });
     console.log('Response from model:', response.data);
 
     const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
 
     if (summary) {
-      console.log(`Summary stored in Firebase for ${videoId}`);
+      console.log(`Summary stored in Firebase for ${videoID}`);
       await docRef.set(
         {
           summary,
@@ -1094,17 +1129,17 @@ app.post('/smart-summary-firebase-v2', async (req, res) => {
     const { url, model } = req.body;
     if (!url) return res.status(400).json({ message: 'URL is required' });
 
-    const videoId = ytdl.getURLVideoID(url);
+    const videoID = ytdl.getURLVideoID(url);
     const db = admin.firestore();
-    const summariesRef = db.collection('summaries').doc(videoId);
-    const transcriptRef = db.collection('transcripts').doc(videoId);
+    const summariesRef = db.collection('summaries').doc(videoID);
+    const transcriptRef = db.collection('transcripts').doc(videoID);
 
     // Check if summary already exists
     const summarySnap = await summariesRef.get();
     if (summarySnap.exists) {
       const data = summarySnap.data();
       if (data.summary) {
-        console.log(`Summary found in Firebase for ${videoId}`);
+        console.log(`Summary found in Firebase for ${videoID}`);
         return res.json({ summary: data.summary, fromCache: true });
       }
     }
@@ -1125,7 +1160,7 @@ app.post('/smart-summary-firebase-v2', async (req, res) => {
 
     // 🧠 Call your deployed endpoint that returns both summary and tags
     const response = await axios.post(modelUrl, {
-      videoId,
+      videoID,
     });
 
     const plainSummary = response.data.summary?.choices?.[0]?.message?.content;
@@ -1147,7 +1182,7 @@ ${tags.map(tag => `  - ${tag}`).join('\n')}
 canonical_url: ${metadata.canonical_url}
 author: ${metadata.author}
 ---
-![](https://www.youtube.com/watch?v=${videoId})
+![](https://www.youtube.com/watch?v=${videoID})
 # ${metadata.title}\n`;
 
     const summaryWithFrontmatter = `${frontmatter}${plainSummary}`;
@@ -1224,17 +1259,17 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     const { url, model } = req.body;
     if (!url) return res.status(400).json({ message: 'URL is required' });
 
-    const videoId = ytdl.getURLVideoID(url);
+    const videoID = ytdl.getURLVideoID(url); console.log('>>> videoID', videoID);
     const db = admin.firestore();
-    const summariesRef = db.collection('summaries').doc(videoId);
-    const transcriptRef = db.collection('transcripts').doc(videoId);
+    const summariesRef = db.collection('summaries').doc(videoID);
+    const transcriptRef = db.collection('transcripts').doc(videoID);
 
     // Check if summary already exists
     const summarySnap = await summariesRef.get();
     if (summarySnap.exists) {
       const data = summarySnap.data();
       if (data.summary) {
-        console.log(`Summary found in Firebase for ${videoId}`);
+        console.log(`Summary found in Firebase for ${videoID}`);
         return res.json({ summary: data.summary, fromCache: true });
       }
     }
@@ -1255,11 +1290,11 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
 
     // 🧠 Call your deployed endpoint that returns the summary
     const response = await axios.post(modelUrl, {
-      videoId,
+      videoID,
     });
     console.log('Response from model:', response.data);
 
-    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
+    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.summary.choices?.[0]?.message?.content;
 
     if (!summary) {
       return res.status(500).json({ message: 'Model did not return a summary' });
@@ -1285,16 +1320,16 @@ canonical_url: ${metadata.canonical_url}
 author: ${metadata.author}
 video_author: ${metadata.video_author}
 video_url: ${metadata.video_url}
-video_id: ${videoId}
+video_id: ${videoID}
 published_date: ${metadata.published_date}
 ---
-![](https://www.youtube.com/watch?v=${videoId})
+![](https://www.youtube.com/watch?v=${videoID})
 # ${metadata.title}\n`;
 
     const summaryWithFrontmatter = `${frontmatter}${summary}`;
 
     // Save the summary to summaries collection
-    console.log(`Summary stored in Firebase for ${videoId}`);
+    console.log(`Summary stored in Firebase for ${videoID}`);
     await summariesRef.set(
       {
         summary: summaryWithFrontmatter,
@@ -1309,6 +1344,71 @@ published_date: ${metadata.published_date}
   } catch (err) {
     console.error('Error in /smart-summary-firebase-v3:', err);
     res.status(500).json({ message: 'Error generating smart summary' });
+  }
+});
+
+// Endpoint to migrate videoId to videoID
+app.post('/migrate-video-ids', async (req, res) => {
+  try {
+    // Get all collections (optional - if you need to scan all collections)
+    const collections = await db.listCollections();
+    
+    let migratedCount = 0;
+    let errorCount = 0;
+
+    // Process each collection
+    for (const collection of collections) {
+      console.log(`Processing collection: ${collection.id}`);
+      
+      // Get all documents in the collection
+      const snapshot = await collection.get();
+      
+      // Process each document
+      const batch = db.batch();
+      let batchCount = 0;
+      
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+        
+        // Check if videoId exists but videoID doesn't
+        if (data.videoId && !data.videoID) {
+          batch.update(doc.ref, {
+            videoID: data.videoId,
+            videoId: admin.firestore.FieldValue.delete()
+          });
+          batchCount++;
+          migratedCount++;
+        }
+        
+        // Commit every 500 documents to avoid batch limits
+        if (batchCount >= 500) {
+          await batch.commit();
+          batchCount = 0;
+          console.log(`Committed batch in ${collection.id}`);
+        }
+      }
+      
+      // Commit any remaining documents in the batch
+      if (batchCount > 0) {
+        await batch.commit();
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Migration completed successfully.`,
+      stats: {
+        migratedDocuments: migratedCount,
+        errors: errorCount
+      }
+    });
+  } catch (error) {
+    console.error('Migration error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Migration failed',
+      error: error.message
+    });
   }
 });
 

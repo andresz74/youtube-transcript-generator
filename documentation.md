@@ -27,7 +27,7 @@ Checks Firestore for a transcript of the YouTube video. If missing, fetches tran
 
 ```json
 {
-  "videoId": "VIDEO_ID",
+  "videoID": "VIDEO_ID",
   "title": "Video Title",
   "duration": 14,
   "transcript": "Full transcript text...",
@@ -92,7 +92,7 @@ This endpoint retrieves full YouTube video information and timestamped captions 
   "status_code": 200,
   "message": "success",
   "data": {
-    "videoId": "VIDEO_ID",
+    "videoID": "VIDEO_ID",
     "videoInfo": {
       "name": "Video Title",
       "thumbnailUrl": {
@@ -142,7 +142,7 @@ This endpoint retrieves full YouTube video information and timestamped captions 
 }
 ```
 
-- **`videoId`**: Unique ID for the YouTube video.
+- **`videoID`**: Unique ID for the YouTube video.
 - **`videoInfo`**: Metadata about the video, such as title, description, duration, etc.
 - **`language_code`**: A list of available languages for the subtitles.
 - **`transcripts`**: An object containing subtitles in all available languages with their respective timestamps and text.
@@ -265,14 +265,14 @@ This endpoint checks Firestore for an existing transcript for the specified YouT
 
 ```json
 {
-  "videoId": "VIDEO_ID",
+  "videoID": "VIDEO_ID",
   "title": "Video Title",
   "duration": 14,
   "transcript": "Full transcript text..."
 }
 ```
 
-- **`videoId`**: Unique video ID.
+- **`videoID`**: Unique video ID.
 - **`title`**: Video title.
 - **`duration`**: Video duration in minutes.
 - **`transcript`**: Full transcript.
@@ -401,7 +401,7 @@ This endpoint enhances `/smart-summary-firebase-v2` by retrieving rich metadata 
 ### **Highlights:**
 
 - Adds extended metadata to the summary frontmatter (e.g., video_author, published_date, video_id, etc.).
-- Sends only the videoId to the AI endpoint for summary generation.
+- Sends only the videoID to the AI endpoint for summary generation.
 - Stores result in summaries collection in Firestore.
 
 ---
