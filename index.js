@@ -1,13 +1,14 @@
 require('dotenv').config();
 
 const axios = require('axios');
-const express = require('express');
 const cors = require('cors');
-const logger = require('./logger');
-const ytdl = require('ytdl-core');
-const getSubtitles = require('youtube-captions-scraper').getSubtitles;
-const TranscriptAPI = require('youtube-transcript-api');
+const express = require('express');
 const he = require('he');
+const getSubtitles = require('youtube-captions-scraper').getSubtitles;
+const ytdl = require('ytdl-core');
+const logger = require('./logger');
+const fabricFetchTranscript = require('./fabric-youtube').fabricFetchTranscript;
+const fetchTranscript = require('./youtube').fetchTranscript;
 
 // Firebase Admin SDK
 const admin = require('firebase-admin');
@@ -63,69 +64,6 @@ app.get('/debug', (req, res) => {
     region: process.env.VERCEL_REGION || 'local',
   });
 });
-
-// helper to fetch and normalize a transcript
-function parseTranscriptXml(xml) {
-  return xml
-    .replace('<?xml version="1.0" encoding="utf-8" ?><transcript>', '')
-    .replace('</transcript>', '')
-    .split('</text>')
-    .filter(line => line.trim())
-    .map(line => {
-      const start = line.match(/start="([\d.]+)"/)[1];
-      const dur = line.match(/dur="([\d.]+)"/)[1];
-      let txt = line.replace(/<text.+?>/, '').replace(/<\/?[^>]+(>|$)/g, '');
-      txt = he.decode(txt.replace(/&amp;/g, '&'));
-      return { start, dur, text: txt };
-    });
-}
-
-async function fetchTranscript(videoID, language) {
-  // 1) first, try the easy library
-  try {
-    const raw = await TranscriptAPI.getTranscript(videoID, language);
-    if (!raw.length) throw new Error('empty');
-    return raw.map(({ text, start, duration }) => ({ text, start, dur: duration }));
-  } catch (err) {
-    const msg = (err.message || '').toLowerCase();
-    if (!/video unavailable|captions disabled|empty/.test(msg)) {
-      // some other error (network, bad ID)… re-throw
-      throw err;
-    }
-    console.warn('⚠️ TranscriptAPI failed, falling back to manual scrape:', err.message);
-  }
-
-  // 2) fallback: scrape YouTube’s signed URL yourself
-  console.log('>>> fallback');
-  const info = await ytdl.getBasicInfo(`https://youtube.com/watch?v=${videoID}`);
-  const tracks = info.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-  if (!tracks.length) {
-    throw new Error('No captionTracks available to scrape.');
-  }
-
-  // pick our language (or default to first)
-  const track = tracks.find(t => t.languageCode === language) || tracks[0];
-  // ✅ use the original signed URL exactly as given
-  const url = track.baseUrl;
-
-  // fetch with browser-like headers
-  const { data: xml } = await axios.get(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': 'https://www.youtube.com/',
-    }
-  });
-  console.log('Manual scrape URL:', url);
-  console.log('Raw XML length:', xml.length);
-  console.log('Raw XML preview:', xml.slice(0, 300).replace(/\n/g, ''));
-
-  const lines = parseTranscriptXml(xml);
-  if (!lines.length) {
-    throw new Error('Manual scrape returned empty transcript.');
-  }
-  return lines;
-}
 
 /**
  * POST /transcript
@@ -265,14 +203,7 @@ app.post('/simple-transcript', async (req, res) => {
     const languageCode = captionTracks[0].languageCode;
 
     // Fetch the transcript in the selected language
-    const lines = await fetchTranscript(videoID, languageCode);
-
-    if (!lines || lines.length === 0) {
-      throw new Error(`No captions available in the selected language (${languageCode}).`);
-    }
-
-    // Combine all transcript items into a single string
-    const transcriptText = lines.map(item => item.text).join(' ');
+    const transcriptText = await fabricFetchTranscript(videoID, languageCode);
 
     // Prepare the simple response format
     const response = {
@@ -328,7 +259,6 @@ app.post('/simple-transcript', async (req, res) => {
  *   - Prioritizes non-auto-generated English captions when no language specified.
  *   - Falls back to first available language if preferred language unavailable.
  */
-
 app.post('/simple-transcript-v2', async (req, res) => {
   try {
     const { url, lang } = req.body;
@@ -483,7 +413,6 @@ app.post('/simple-transcript-v2', async (req, res) => {
  * 
  *   500: An error occurred while fetching or saving the transcript.
  */
-
 async function safeGetVideoInfo(url) {
   try {
     return await ytdl.getBasicInfo(url);
@@ -494,7 +423,6 @@ async function safeGetVideoInfo(url) {
     throw err;
   }
 }
-
 app.post('/simple-transcript-v3', async (req, res) => {
   try {
     const { url, lang } = req.body;
@@ -554,21 +482,14 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
       // const transcriptText = await getSubtitles({ videoID: videoID, lang });
       // lines is your array of { start, dur, text }
-      const lines = await fetchTranscript(videoID, selectedLanguageCode);
-
-      if (!lines || lines.length === 0) {
-        throw new Error(`No captions available in the selected language (${selectedLanguageCode}).`);
-      }
-
-      // build a single string
-      const transcriptTextJoined = lines.map(item => item.text).join(' ');
+      const transcript = await fabricFetchTranscript(videoID, selectedLanguageCode);
 
       // Update transcript array
       const transcriptArray = cached.transcript;
       transcriptArray.push({
         language: lang,
         title: videoInfo.videoDetails.title,
-        transcript: transcriptTextJoined
+        transcript: transcript
       });
 
       // Save updated array
@@ -584,7 +505,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
         videoID: cached.videoID,
         duration: cached.duration,
         title: videoInfo.videoDetails.title,
-        transcript: transcriptTextJoined,
+        transcript: transcript,
         transcriptLanguageCode: lang,
         languages: availableLanguages.length > 0 ? availableLanguages : undefined
       });
@@ -616,7 +537,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
     const existingData = doc.exists ? doc.data() : null;
     let transcriptArray = existingData ? existingData.transcript : [];
 
-    let selectedTranscriptText = '';
+    let transcriptText = '';
     let selectedLanguageCode = '';
 
     // ------------------------------
@@ -630,9 +551,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
       selectedLanguageCode = lang;
       // lines is your array of { start, dur, text }
-      const lines = await fetchTranscript(videoID, selectedLanguageCode);
-      // build a single string
-      selectedTranscriptText = lines.map(item => item.text).join(' ');
+      transcriptText = await fabricFetchTranscript(videoID, selectedLanguageCode);
 
     } else {
       const preferredTrack = captionTracks.find(track => track.languageCode.startsWith('en') && track.kind !== 'asr')
@@ -640,10 +559,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
         || captionTracks[0];
 
       selectedLanguageCode = preferredTrack.languageCode;
-      // lines is your array of { start, dur, text }
-      const lines = await fetchTranscript(videoID, selectedLanguageCode);
-      // build a single string
-      selectedTranscriptText = lines.map(item => item.text).join(' ');
+      transcriptText = await fabricFetchTranscript(videoID, selectedLanguageCode);
     }
 
     // ------------------------------
@@ -656,14 +572,14 @@ app.post('/simple-transcript-v3', async (req, res) => {
       transcriptArray[existingIndex] = {
         language: selectedLanguageCode,
         title: videoInfo.videoDetails.title,
-        transcript: selectedTranscriptText
+        transcript: transcriptText
       };
     } else {
       // Add new transcript
       transcriptArray.push({
         language: selectedLanguageCode,
         title: videoInfo.videoDetails.title,
-        transcript: selectedTranscriptText
+        transcript: transcriptText
       });
     }
 
@@ -687,7 +603,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
       videoID: videoID,
       duration: duration,
       title: videoInfo.videoDetails.title,
-      transcript: selectedTranscriptText,
+      transcript: transcriptText,
       transcriptLanguageCode: selectedLanguageCode,
       languages: availableLanguages.length > 0 ? availableLanguages : undefined,
       videoInfoSummary: {
@@ -835,8 +751,7 @@ app.post('/smart-transcript-v2', async (req, res) => {
     let transcript = '';
     try {
       if (languageCode) {
-        const lines = await fetchTranscript(videoID, languageCode);
-        transcript = lines.map(item => item.text).join(' ');
+        transcript = await fabricFetchTranscript(videoID, languageCode);
       } else {
         console.warn('No caption language available.');
       }
@@ -1254,7 +1169,6 @@ author: ${metadata.author}
  *   message: string
  * }
  */
-
 app.post('/smart-summary-firebase-v3', async (req, res) => {
   try {
     const { url, model } = req.body;
