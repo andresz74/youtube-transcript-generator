@@ -414,7 +414,9 @@ app.post('/simple-transcript-v2', async (req, res) => {
  *   500: An error occurred while fetching or saving the transcript.
  */
 async function safeGetVideoInfo(url) {
+  console.log('===> safeGetVideoInfo');
   try {
+    console.log('===> safeGetVideoInfo try');
     return await ytdl.getBasicInfo(url);
   } catch (err) {
     if (err.message.includes('private video')) {
@@ -429,6 +431,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
     console.log('URL:', url, ', Language:', lang);
 
     const videoID = ytdl.getURLVideoID(url);
+    console.log('===> videoID:', videoID);
     const docRef = db.collection('transcripts-multilingual').doc(videoID);
     const doc = await docRef.get();
 
@@ -482,7 +485,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
       // const transcriptText = await getSubtitles({ videoID: videoID, lang });
       // lines is your array of { start, dur, text }
-      const transcript = await fabricFetchTranscript(videoID, selectedLanguageCode);
+      const transcript = await fabricFetchTranscript(videoID, lang);
 
       // Update transcript array
       const transcriptArray = cached.transcript;
@@ -515,6 +518,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
     // No cached transcript → fetch video info and captions
     // ------------------------------
     const videoInfo = await safeGetVideoInfo(url);
+    console.log('===> videoInfo:', videoInfo);
     if (!videoInfo) {
       return res.status(403).json({ message: 'This is a private video. Cannot fetch transcript.' });
     }
@@ -1209,7 +1213,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     });
     console.log('Response from model:', response.data);
 
-    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.summary.choices?.[0]?.message?.content;
+    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
 
     if (!summary) {
       return res.status(500).json({ message: 'Model did not return a summary' });

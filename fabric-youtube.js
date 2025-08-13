@@ -36,12 +36,14 @@ function cleanVttContent(content) {
 }
 
 async function fabricFetchTranscript(videoID, lang = 'en') {
+  console.log('===> fabricFetchTranscript')
   if (!videoID) throw new Error('Missing YouTube URL');
 
   const { path: tmpDirPath, cleanup } = await tmp.dir({ unsafeCleanup: true });
   const outputPath = path.join(tmpDirPath, '%(title)s.%(ext)s');
 
   const args = [
+    '--cookies', path.resolve(__dirname, 'all_cookies.txt'),
     '--write-auto-subs',
     '--sub-lang', lang,
     '--skip-download',

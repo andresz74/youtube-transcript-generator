@@ -28,3 +28,4 @@ ecosystem.config.js
 *.excalidraw
 
 endpoint.log
+all_cookies.txt
