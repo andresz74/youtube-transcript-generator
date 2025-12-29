@@ -1241,7 +1241,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     const response = await axios.post(modelUrl, {
       videoID,
     }, { timeout: 120000 });
-    console.log('Response from model:', response.data);
+    console.log('Response from model:', response.data.choices);
 
     const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
 
