@@ -735,7 +735,15 @@ app.post('/smart-transcript', async (req, res) => {
 app.post('/smart-transcript-v2', async (req, res) => {
   try {
     const { url } = req.body;
-    const videoID = ytdl.getURLVideoID(url);
+    if (!url) {
+      return res.status(400).json({ message: 'URL is required' });
+    }
+    let videoID;
+    try {
+      videoID = ytdl.getURLVideoID(url);
+    } catch (err) {
+      return res.status(400).json({ message: 'Invalid YouTube URL' });
+    }
     console.log('>>> videoID', videoID);
 
     const docRef = db.collection('transcripts').doc(videoID);
@@ -750,17 +758,30 @@ app.post('/smart-transcript-v2', async (req, res) => {
     const playerResponse = videoInfo.player_response;
 
     const captionTracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    if (captionTracks.length === 0) {
+      return res.status(404).json({ message: 'No captions available for this video.' });
+    }
     const languageCode = captionTracks[0]?.languageCode;
 
     let transcript = '';
     try {
       if (languageCode) {
         transcript = await fabricFetchTranscript(videoID, languageCode);
+        if (!transcript) {
+          const fallback = await getSubtitles({ videoID, lang: languageCode });
+          transcript = fallback.map(item => item.text).join(' ');
+        }
       } else {
         console.warn('No caption language available.');
       }
     } catch (transcriptError) {
-      console.warn('Transcript fetch failed:', transcriptError.message);
+      try {
+        const fallback = await getSubtitles({ videoID, lang: languageCode });
+        transcript = fallback.map(item => item.text).join(' ');
+      } catch (fallbackError) {
+        console.warn('Transcript fetch failed:', transcriptError.message);
+        console.warn('Transcript fallback failed:', fallbackError.message);
+      }
     }
 
     // Metadata to save
@@ -769,7 +790,9 @@ app.post('/smart-transcript-v2', async (req, res) => {
     const publishedAt = videoInfo.videoDetails.publishDate || new Date().toISOString().split('T')[0];
     const image = `https://i.ytimg.com/vi/${videoID}/maxresdefault.jpg`;
     const tags = videoInfo.videoDetails.keywords || [];
-    const canonical_url = `https://blog.andreszenteno.com/notes/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+    const slugBase = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const slug = slugBase.slice(0, 80) || videoID;
+    const canonical_url = `https://blog.andreszenteno.com/notes/${slug}`;
     const video_author = videoInfo.videoDetails.author.name;
     const video_url = videoInfo.videoDetails.video_url;
     const category = videoInfo.videoDetails.category;
@@ -813,11 +836,10 @@ app.post('/smart-transcript-v2', async (req, res) => {
       transcript,
     };
 
-    if (transcript) {
-      res.json(responsePayload);
-    } else {
-      res.status(404).json({ ...responsePayload, message: 'No transcript found, but metadata saved.' });
+    if (!transcript) {
+      responsePayload.warning = 'No transcript found, but metadata saved.';
     }
+    res.json(responsePayload);
 
   } catch (error) {
     console.error('Error fetching/storing transcript:', error);
@@ -1177,8 +1199,15 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
   try {
     const { url, model } = req.body;
     if (!url) return res.status(400).json({ message: 'URL is required' });
+    if (!model) return res.status(400).json({ message: 'Model is required' });
 
-    const videoID = ytdl.getURLVideoID(url); console.log('>>> videoID', videoID);
+    let videoID;
+    try {
+      videoID = ytdl.getURLVideoID(url);
+    } catch (err) {
+      return res.status(400).json({ message: 'Invalid YouTube URL' });
+    }
+    console.log('>>> videoID', videoID);
     const db = admin.firestore();
     const summariesRef = db.collection('summaries').doc(videoID);
     const transcriptRef = db.collection('transcripts').doc(videoID);
@@ -1200,6 +1229,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     }
 
     const metadata = transcriptSnap.data();
+    const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
 
     // Ensure model is valid
     const modelUrl = modelUrls[model];
@@ -1210,7 +1240,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     // 🧠 Call your deployed endpoint that returns the summary
     const response = await axios.post(modelUrl, {
       videoID,
-    });
+    }, { timeout: 120000 });
     console.log('Response from model:', response.data);
 
     const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
@@ -1218,7 +1248,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     if (!summary) {
       return res.status(500).json({ message: 'Model did not return a summary' });
     }
-    const rawDescription = metadata.description;
+    const rawDescription = metadata.description || '';
     const yamlSafeDescription = '|\n' + rawDescription
       .replace(/\r\n/g, '\n') // Normalize Windows newlines
       .split('\n')
@@ -1234,7 +1264,7 @@ description: ${yamlSafeDescription}
 image: '${metadata.image}'
 duration: ${metadata.duration}
 tags: 
-${metadata.tags.map(tag => `  - ${tag}`).join('\n')}
+${tags.map(tag => `  - ${tag}`).join('\n')}
 canonical_url: ${metadata.canonical_url}
 author: ${metadata.author}
 video_author: ${metadata.video_author}
@@ -1253,7 +1283,7 @@ published_date: ${metadata.published_date}
       {
         summary: summaryWithFrontmatter,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        tags: metadata.tags,
+        tags,
       },
       { merge: true }
     );
