@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start-fabric": "node fabric-youtube.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -18,6 +19,7 @@
     "express": "^4.21.0",
     "firebase-admin": "^13.2.0",
     "he": "^1.2.0",
+    "tmp-promise": "^3.0.3",
     "winston": "^3.17.0",
     "youtube-captions-scraper": "^2.0.3",
     "youtube-transcript-api": "^2.0.4",

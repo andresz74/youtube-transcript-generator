@@ -1,13 +1,14 @@
 require('dotenv').config();
 
 const axios = require('axios');
-const express = require('express');
 const cors = require('cors');
-const logger = require('./logger');
-const ytdl = require('ytdl-core');
-const getSubtitles = require('youtube-captions-scraper').getSubtitles;
-const TranscriptAPI = require('youtube-transcript-api');
+const express = require('express');
 const he = require('he');
+const getSubtitles = require('youtube-captions-scraper').getSubtitles;
+const ytdl = require('ytdl-core');
+const logger = require('./logger');
+const fabricFetchTranscript = require('./fabric-youtube').fabricFetchTranscript;
+const fetchTranscript = require('./youtube').fetchTranscript;
 
 // Firebase Admin SDK
 const admin = require('firebase-admin');
@@ -63,69 +64,6 @@ app.get('/debug', (req, res) => {
     region: process.env.VERCEL_REGION || 'local',
   });
 });
-
-// helper to fetch and normalize a transcript
-function parseTranscriptXml(xml) {
-  return xml
-    .replace('<?xml version="1.0" encoding="utf-8" ?><transcript>', '')
-    .replace('</transcript>', '')
-    .split('</text>')
-    .filter(line => line.trim())
-    .map(line => {
-      const start = line.match(/start="([\d.]+)"/)[1];
-      const dur = line.match(/dur="([\d.]+)"/)[1];
-      let txt = line.replace(/<text.+?>/, '').replace(/<\/?[^>]+(>|$)/g, '');
-      txt = he.decode(txt.replace(/&amp;/g, '&'));
-      return { start, dur, text: txt };
-    });
-}
-
-async function fetchTranscript(videoID, language) {
-  // 1) first, try the easy library
-  try {
-    const raw = await TranscriptAPI.getTranscript(videoID, language);
-    if (!raw.length) throw new Error('empty');
-    return raw.map(({ text, start, duration }) => ({ text, start, dur: duration }));
-  } catch (err) {
-    const msg = (err.message || '').toLowerCase();
-    if (!/video unavailable|captions disabled|empty/.test(msg)) {
-      // some other error (network, bad ID)… re-throw
-      throw err;
-    }
-    console.warn('⚠️ TranscriptAPI failed, falling back to manual scrape:', err.message);
-  }
-
-  // 2) fallback: scrape YouTube’s signed URL yourself
-  console.log('>>> fallback');
-  const info = await ytdl.getBasicInfo(`https://youtube.com/watch?v=${videoID}`);
-  const tracks = info.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-  if (!tracks.length) {
-    throw new Error('No captionTracks available to scrape.');
-  }
-
-  // pick our language (or default to first)
-  const track = tracks.find(t => t.languageCode === language) || tracks[0];
-  // ✅ use the original signed URL exactly as given
-  const url = track.baseUrl;
-
-  // fetch with browser-like headers
-  const { data: xml } = await axios.get(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': 'https://www.youtube.com/',
-    }
-  });
-  console.log('Manual scrape URL:', url);
-  console.log('Raw XML length:', xml.length);
-  console.log('Raw XML preview:', xml.slice(0, 300).replace(/\n/g, ''));
-
-  const lines = parseTranscriptXml(xml);
-  if (!lines.length) {
-    throw new Error('Manual scrape returned empty transcript.');
-  }
-  return lines;
-}
 
 /**
  * POST /transcript
@@ -265,14 +203,7 @@ app.post('/simple-transcript', async (req, res) => {
     const languageCode = captionTracks[0].languageCode;
 
     // Fetch the transcript in the selected language
-    const lines = await fetchTranscript(videoID, languageCode);
-
-    if (!lines || lines.length === 0) {
-      throw new Error(`No captions available in the selected language (${languageCode}).`);
-    }
-
-    // Combine all transcript items into a single string
-    const transcriptText = lines.map(item => item.text).join(' ');
+    const transcriptText = await fabricFetchTranscript(videoID, languageCode);
 
     // Prepare the simple response format
     const response = {
@@ -328,7 +259,6 @@ app.post('/simple-transcript', async (req, res) => {
  *   - Prioritizes non-auto-generated English captions when no language specified.
  *   - Falls back to first available language if preferred language unavailable.
  */
-
 app.post('/simple-transcript-v2', async (req, res) => {
   try {
     const { url, lang } = req.body;
@@ -483,9 +413,10 @@ app.post('/simple-transcript-v2', async (req, res) => {
  * 
  *   500: An error occurred while fetching or saving the transcript.
  */
-
 async function safeGetVideoInfo(url) {
+  console.log('===> safeGetVideoInfo');
   try {
+    console.log('===> safeGetVideoInfo try');
     return await ytdl.getBasicInfo(url);
   } catch (err) {
     if (err.message.includes('private video')) {
@@ -494,13 +425,13 @@ async function safeGetVideoInfo(url) {
     throw err;
   }
 }
-
 app.post('/simple-transcript-v3', async (req, res) => {
   try {
     const { url, lang } = req.body;
     console.log('URL:', url, ', Language:', lang);
 
     const videoID = ytdl.getURLVideoID(url);
+    console.log('===> videoID:', videoID);
     const docRef = db.collection('transcripts-multilingual').doc(videoID);
     const doc = await docRef.get();
 
@@ -554,21 +485,14 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
       // const transcriptText = await getSubtitles({ videoID: videoID, lang });
       // lines is your array of { start, dur, text }
-      const lines = await fetchTranscript(videoID, selectedLanguageCode);
-
-      if (!lines || lines.length === 0) {
-        throw new Error(`No captions available in the selected language (${selectedLanguageCode}).`);
-      }
-
-      // build a single string
-      const transcriptTextJoined = lines.map(item => item.text).join(' ');
+      const transcript = await fabricFetchTranscript(videoID, lang);
 
       // Update transcript array
       const transcriptArray = cached.transcript;
       transcriptArray.push({
         language: lang,
         title: videoInfo.videoDetails.title,
-        transcript: transcriptTextJoined
+        transcript: transcript
       });
 
       // Save updated array
@@ -584,7 +508,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
         videoID: cached.videoID,
         duration: cached.duration,
         title: videoInfo.videoDetails.title,
-        transcript: transcriptTextJoined,
+        transcript: transcript,
         transcriptLanguageCode: lang,
         languages: availableLanguages.length > 0 ? availableLanguages : undefined
       });
@@ -594,6 +518,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
     // No cached transcript → fetch video info and captions
     // ------------------------------
     const videoInfo = await safeGetVideoInfo(url);
+    console.log('===> videoInfo:', videoInfo);
     if (!videoInfo) {
       return res.status(403).json({ message: 'This is a private video. Cannot fetch transcript.' });
     }
@@ -616,7 +541,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
     const existingData = doc.exists ? doc.data() : null;
     let transcriptArray = existingData ? existingData.transcript : [];
 
-    let selectedTranscriptText = '';
+    let transcriptText = '';
     let selectedLanguageCode = '';
 
     // ------------------------------
@@ -630,9 +555,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
       selectedLanguageCode = lang;
       // lines is your array of { start, dur, text }
-      const lines = await fetchTranscript(videoID, selectedLanguageCode);
-      // build a single string
-      selectedTranscriptText = lines.map(item => item.text).join(' ');
+      transcriptText = await fabricFetchTranscript(videoID, selectedLanguageCode);
 
     } else {
       const preferredTrack = captionTracks.find(track => track.languageCode.startsWith('en') && track.kind !== 'asr')
@@ -640,10 +563,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
         || captionTracks[0];
 
       selectedLanguageCode = preferredTrack.languageCode;
-      // lines is your array of { start, dur, text }
-      const lines = await fetchTranscript(videoID, selectedLanguageCode);
-      // build a single string
-      selectedTranscriptText = lines.map(item => item.text).join(' ');
+      transcriptText = await fabricFetchTranscript(videoID, selectedLanguageCode);
     }
 
     // ------------------------------
@@ -656,14 +576,14 @@ app.post('/simple-transcript-v3', async (req, res) => {
       transcriptArray[existingIndex] = {
         language: selectedLanguageCode,
         title: videoInfo.videoDetails.title,
-        transcript: selectedTranscriptText
+        transcript: transcriptText
       };
     } else {
       // Add new transcript
       transcriptArray.push({
         language: selectedLanguageCode,
         title: videoInfo.videoDetails.title,
-        transcript: selectedTranscriptText
+        transcript: transcriptText
       });
     }
 
@@ -687,7 +607,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
       videoID: videoID,
       duration: duration,
       title: videoInfo.videoDetails.title,
-      transcript: selectedTranscriptText,
+      transcript: transcriptText,
       transcriptLanguageCode: selectedLanguageCode,
       languages: availableLanguages.length > 0 ? availableLanguages : undefined,
       videoInfoSummary: {
@@ -815,7 +735,15 @@ app.post('/smart-transcript', async (req, res) => {
 app.post('/smart-transcript-v2', async (req, res) => {
   try {
     const { url } = req.body;
-    const videoID = ytdl.getURLVideoID(url);
+    if (!url) {
+      return res.status(400).json({ message: 'URL is required' });
+    }
+    let videoID;
+    try {
+      videoID = ytdl.getURLVideoID(url);
+    } catch (err) {
+      return res.status(400).json({ message: 'Invalid YouTube URL' });
+    }
     console.log('>>> videoID', videoID);
 
     const docRef = db.collection('transcripts').doc(videoID);
@@ -830,18 +758,30 @@ app.post('/smart-transcript-v2', async (req, res) => {
     const playerResponse = videoInfo.player_response;
 
     const captionTracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    if (captionTracks.length === 0) {
+      return res.status(404).json({ message: 'No captions available for this video.' });
+    }
     const languageCode = captionTracks[0]?.languageCode;
 
     let transcript = '';
     try {
       if (languageCode) {
-        const lines = await fetchTranscript(videoID, languageCode);
-        transcript = lines.map(item => item.text).join(' ');
+        transcript = await fabricFetchTranscript(videoID, languageCode);
+        if (!transcript) {
+          const fallback = await getSubtitles({ videoID, lang: languageCode });
+          transcript = fallback.map(item => item.text).join(' ');
+        }
       } else {
         console.warn('No caption language available.');
       }
     } catch (transcriptError) {
-      console.warn('Transcript fetch failed:', transcriptError.message);
+      try {
+        const fallback = await getSubtitles({ videoID, lang: languageCode });
+        transcript = fallback.map(item => item.text).join(' ');
+      } catch (fallbackError) {
+        console.warn('Transcript fetch failed:', transcriptError.message);
+        console.warn('Transcript fallback failed:', fallbackError.message);
+      }
     }
 
     // Metadata to save
@@ -850,7 +790,9 @@ app.post('/smart-transcript-v2', async (req, res) => {
     const publishedAt = videoInfo.videoDetails.publishDate || new Date().toISOString().split('T')[0];
     const image = `https://i.ytimg.com/vi/${videoID}/maxresdefault.jpg`;
     const tags = videoInfo.videoDetails.keywords || [];
-    const canonical_url = `https://blog.andreszenteno.com/notes/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+    const slugBase = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const slug = slugBase.slice(0, 80) || videoID;
+    const canonical_url = `https://blog.andreszenteno.com/notes/${slug}`;
     const video_author = videoInfo.videoDetails.author.name;
     const video_url = videoInfo.videoDetails.video_url;
     const category = videoInfo.videoDetails.category;
@@ -894,11 +836,10 @@ app.post('/smart-transcript-v2', async (req, res) => {
       transcript,
     };
 
-    if (transcript) {
-      res.json(responsePayload);
-    } else {
-      res.status(404).json({ ...responsePayload, message: 'No transcript found, but metadata saved.' });
+    if (!transcript) {
+      responsePayload.warning = 'No transcript found, but metadata saved.';
     }
+    res.json(responsePayload);
 
   } catch (error) {
     console.error('Error fetching/storing transcript:', error);
@@ -1254,13 +1195,19 @@ author: ${metadata.author}
  *   message: string
  * }
  */
-
 app.post('/smart-summary-firebase-v3', async (req, res) => {
   try {
     const { url, model } = req.body;
     if (!url) return res.status(400).json({ message: 'URL is required' });
+    if (!model) return res.status(400).json({ message: 'Model is required' });
 
-    const videoID = ytdl.getURLVideoID(url); console.log('>>> videoID', videoID);
+    let videoID;
+    try {
+      videoID = ytdl.getURLVideoID(url);
+    } catch (err) {
+      return res.status(400).json({ message: 'Invalid YouTube URL' });
+    }
+    console.log('>>> videoID', videoID);
     const db = admin.firestore();
     const summariesRef = db.collection('summaries').doc(videoID);
     const transcriptRef = db.collection('transcripts').doc(videoID);
@@ -1282,6 +1229,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     }
 
     const metadata = transcriptSnap.data();
+    const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
 
     // Ensure model is valid
     const modelUrl = modelUrls[model];
@@ -1292,7 +1240,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     // 🧠 Call your deployed endpoint that returns the summary
     const response = await axios.post(modelUrl, {
       videoID,
-    });
+    }, { timeout: 120000 });
     console.log('Response from model:', response.data.choices);
 
     const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
@@ -1300,9 +1248,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     if (!summary) {
       return res.status(500).json({ message: 'Model did not return a summary' });
     }
-    console.log(`===> metadata`, metadata);
-    const rawDescription = metadata.description;
-    console.log(`===> rawDesc`, rawDescription);
+    const rawDescription = metadata.description || '';
     const yamlSafeDescription = '|\n' + rawDescription
       .replace(/\r\n/g, '\n') // Normalize Windows newlines
       .split('\n')
@@ -1318,7 +1264,7 @@ description: ${yamlSafeDescription}
 image: '${metadata.image}'
 duration: ${metadata.duration}
 tags: 
-${metadata.tags.map(tag => `  - ${tag}`).join('\n')}
+${tags.map(tag => `  - ${tag}`).join('\n')}
 canonical_url: ${metadata.canonical_url}
 author: ${metadata.author}
 video_author: ${metadata.video_author}
@@ -1337,7 +1283,7 @@ published_date: ${metadata.published_date}
       {
         summary: summaryWithFrontmatter,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        tags: metadata.tags,
+        tags,
       },
       { merge: true }
     );
