@@ -26,3 +26,6 @@ yarn-error.log*
 firebaseServiceAccount.json
 ecosystem.config.js
 *.excalidraw
+
+endpoint.log
+all_cookies.txt
