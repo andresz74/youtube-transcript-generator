@@ -1293,14 +1293,16 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     const response = await axios.post(modelUrl, {
       videoID,
     });
-    console.log('Response from model:', response.data);
+    console.log('Response from model:', response.data.choices);
 
-    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.summary.choices?.[0]?.message?.content;
+    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
 
     if (!summary) {
       return res.status(500).json({ message: 'Model did not return a summary' });
     }
+    console.log(`===> metadata`, metadata);
     const rawDescription = metadata.description;
+    console.log(`===> rawDesc`, rawDescription);
     const yamlSafeDescription = '|\n' + rawDescription
       .replace(/\r\n/g, '\n') // Normalize Windows newlines
       .split('\n')
