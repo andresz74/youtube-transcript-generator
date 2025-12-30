@@ -873,6 +873,34 @@ const modelUrls = {
   anthropic: process.env.ANTHROPIC_VERCEL_URL,
 };
 
+const MODEL_TIMEOUT_MS = 120000;
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+
+async function postWithRetry(url, payload, options = {}) {
+  const maxAttempts = options.maxAttempts || 3;
+  const baseDelayMs = options.baseDelayMs || 500;
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await axios.post(url, payload, {
+        timeout: MODEL_TIMEOUT_MS,
+        ...options.axiosOptions,
+      });
+    } catch (err) {
+      lastError = err;
+      const status = err.response?.status;
+      if (!status || !RETRYABLE_STATUS_CODES.has(status) || attempt === maxAttempts) {
+        throw err;
+      }
+      const delay = baseDelayMs * Math.pow(2, attempt - 1);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
+
 app.post('/smart-summary', async (req, res) => {
   try {
     const { url, transcript, model } = req.body;
@@ -1238,9 +1266,15 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     }
 
     // 🧠 Call your deployed endpoint that returns the summary
-    const response = await axios.post(modelUrl, {
-      videoID,
-    }, { timeout: 120000 });
+    let response;
+    try {
+      response = await postWithRetry(modelUrl, { videoID }, { maxAttempts: 3, baseDelayMs: 750 });
+    } catch (err) {
+      const status = err.response?.status || 502;
+      const details = err.response?.data || err.message;
+      console.error('Model request failed:', status, details);
+      return res.status(502).json({ message: 'Model request failed', status, details });
+    }
     console.log('Response from model:', response.data);
 
     const summary = model === 'anthropic'
