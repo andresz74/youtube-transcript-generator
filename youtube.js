@@ -1,6 +1,7 @@
 const axios = require('axios');
 const TranscriptAPI = require('youtube-transcript-api');
 const ytdl = require('ytdl-core');
+const he = require('he');
 
 // helper to fetch and normalize a transcript
 function parseTranscriptXml(xml) {

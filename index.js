@@ -750,7 +750,10 @@ app.post('/smart-transcript-v2', async (req, res) => {
     const doc = await docRef.get();
     if (doc.exists) {
       console.log(`Transcript found in Firebase for ${videoID}`);
-      return res.json(doc.data());
+      const cached = doc.data();
+      if (cached?.transcript) {
+        return res.json(cached);
+      }
     }
 
     const videoInfo = await ytdl.getBasicInfo(url);
@@ -761,7 +764,10 @@ app.post('/smart-transcript-v2', async (req, res) => {
     if (captionTracks.length === 0) {
       return res.status(404).json({ message: 'No captions available for this video.' });
     }
-    const languageCode = captionTracks[0]?.languageCode;
+    const preferredTrack = captionTracks.find(track => track.languageCode?.startsWith('en') && track.kind !== 'asr')
+      || captionTracks.find(track => track.languageCode?.startsWith('en'))
+      || captionTracks[0];
+    const languageCode = preferredTrack?.languageCode;
 
     let transcript = '';
     try {
@@ -779,8 +785,14 @@ app.post('/smart-transcript-v2', async (req, res) => {
         const fallback = await getSubtitles({ videoID, lang: languageCode });
         transcript = fallback.map(item => item.text).join(' ');
       } catch (fallbackError) {
-        console.warn('Transcript fetch failed:', transcriptError.message);
-        console.warn('Transcript fallback failed:', fallbackError.message);
+        try {
+          const lines = await fetchTranscript(videoID, languageCode || 'en');
+          transcript = lines.map(item => item.text).join(' ');
+        } catch (scrapeError) {
+          console.warn('Transcript fetch failed:', transcriptError.message);
+          console.warn('Transcript fallback failed:', fallbackError.message);
+          console.warn('Transcript scrape failed:', scrapeError.message);
+        }
       }
     }
 
