@@ -814,19 +814,22 @@ app.post('/smart-transcript-v2', async (req, res) => {
         }
         transcript = fallback.map(item => item.text).join(' ');
       } catch (fallbackError) {
-        try {
-          console.log('Attempting fetchTranscript scrape fallback...');
-          const lines = await fetchTranscript(videoID, languageCode || 'en');
-          console.log('fetchTranscript result items:', lines ? lines.length : 0);
-          transcript = lines.map(item => item.text).join(' ');
-        } catch (scrapeError) {
-          console.warn('Transcript fetch failed:', transcriptError.message);
-          console.warn('Transcript fallback failed:', fallbackError.message);
-          console.warn('Transcript scrape failed:', scrapeError.message);
-          console.warn(transcriptError.stack || transcriptError);
-          console.warn(fallbackError.stack || fallbackError);
-          console.warn(scrapeError.stack || scrapeError);
-        }
+        console.warn('Transcript fetch failed:', transcriptError.message);
+        console.warn('Transcript fallback failed:', fallbackError.message);
+        console.warn(transcriptError.stack || transcriptError);
+        console.warn(fallbackError.stack || fallbackError);
+      }
+    }
+
+    if (!transcript) {
+      try {
+        console.log('Attempting fetchTranscript scrape fallback...');
+        const lines = await fetchTranscript(videoID, languageCode || 'en');
+        console.log('fetchTranscript result items:', lines ? lines.length : 0);
+        transcript = lines.map(item => item.text).join(' ');
+      } catch (scrapeError) {
+        console.warn('Transcript scrape failed:', scrapeError.message);
+        console.warn(scrapeError.stack || scrapeError);
       }
     }
 
