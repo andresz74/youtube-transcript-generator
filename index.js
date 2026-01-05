@@ -769,29 +769,57 @@ app.post('/smart-transcript-v2', async (req, res) => {
       || captionTracks[0];
     const languageCode = preferredTrack?.languageCode;
 
+    console.log('Transcript fetch candidates:', captionTracks.map(track => ({
+      code: track.languageCode,
+      name: track.name?.simpleText,
+      kind: track.kind || 'manual',
+    })));
+    console.log('Selected transcript languageCode:', languageCode);
+
     let transcript = '';
     try {
       if (languageCode) {
-        transcript = await fabricFetchTranscript(videoID, languageCode);
+        try {
+          console.log('Attempting fabricFetchTranscript...');
+          transcript = await fabricFetchTranscript(videoID, languageCode);
+          console.log('fabricFetchTranscript result length:', transcript ? transcript.length : 0);
+        } catch (fabricError) {
+          console.warn('fabricFetchTranscript failed:', fabricError.message);
+          console.warn(fabricError.stack || fabricError);
+        }
         if (!transcript) {
-          const fallback = await getSubtitles({ videoID, lang: languageCode });
-          transcript = fallback.map(item => item.text).join(' ');
+          try {
+            console.log('Attempting getSubtitles fallback...');
+            const fallback = await getSubtitles({ videoID, lang: languageCode });
+            console.log('getSubtitles result items:', fallback ? fallback.length : 0);
+            transcript = fallback.map(item => item.text).join(' ');
+          } catch (subtitlesError) {
+            console.warn('getSubtitles failed:', subtitlesError.message);
+            console.warn(subtitlesError.stack || subtitlesError);
+          }
         }
       } else {
         console.warn('No caption language available.');
       }
     } catch (transcriptError) {
       try {
+        console.log('Attempting getSubtitles fallback after error...');
         const fallback = await getSubtitles({ videoID, lang: languageCode });
+        console.log('getSubtitles result items:', fallback ? fallback.length : 0);
         transcript = fallback.map(item => item.text).join(' ');
       } catch (fallbackError) {
         try {
+          console.log('Attempting fetchTranscript scrape fallback...');
           const lines = await fetchTranscript(videoID, languageCode || 'en');
+          console.log('fetchTranscript result items:', lines ? lines.length : 0);
           transcript = lines.map(item => item.text).join(' ');
         } catch (scrapeError) {
           console.warn('Transcript fetch failed:', transcriptError.message);
           console.warn('Transcript fallback failed:', fallbackError.message);
           console.warn('Transcript scrape failed:', scrapeError.message);
+          console.warn(transcriptError.stack || transcriptError);
+          console.warn(fallbackError.stack || fallbackError);
+          console.warn(scrapeError.stack || scrapeError);
         }
       }
     }
