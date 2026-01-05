@@ -792,6 +792,9 @@ app.post('/smart-transcript-v2', async (req, res) => {
             console.log('Attempting getSubtitles fallback...');
             const fallback = await getSubtitles({ videoID, lang: languageCode });
             console.log('getSubtitles result items:', fallback ? fallback.length : 0);
+            if (!fallback || fallback.length === 0) {
+              throw new Error('getSubtitles returned empty result');
+            }
             transcript = fallback.map(item => item.text).join(' ');
           } catch (subtitlesError) {
             console.warn('getSubtitles failed:', subtitlesError.message);
@@ -806,6 +809,9 @@ app.post('/smart-transcript-v2', async (req, res) => {
         console.log('Attempting getSubtitles fallback after error...');
         const fallback = await getSubtitles({ videoID, lang: languageCode });
         console.log('getSubtitles result items:', fallback ? fallback.length : 0);
+        if (!fallback || fallback.length === 0) {
+          throw new Error('getSubtitles returned empty result');
+        }
         transcript = fallback.map(item => item.text).join(' ');
       } catch (fallbackError) {
         try {
