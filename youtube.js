@@ -38,6 +38,19 @@ function parseTranscriptXml(xml) {
     });
 }
 
+function parseTranscriptJson3(json) {
+  const events = json?.events || [];
+  return events
+    .filter(event => Array.isArray(event.segs))
+    .map(event => {
+      const text = event.segs.map(seg => seg.utf8 || '').join('');
+      const start = (event.tStartMs || 0) / 1000;
+      const dur = (event.dDurationMs || 0) / 1000;
+      return { start, dur, text: text.trim() };
+    })
+    .filter(line => line.text);
+}
+
 async function fetchTranscript(videoID, language) {
   const cookieHeader = loadCookieHeader();
   const requestHeaders = {
@@ -86,7 +99,20 @@ async function fetchTranscript(videoID, language) {
   console.log('Raw XML length:', xml.length);
   console.log('Raw XML preview:', xml.slice(0, 300).replace(/\n/g, ''));
 
-  const lines = parseTranscriptXml(xml);
+  let lines = parseTranscriptXml(xml);
+  if (!lines.length) {
+    try {
+      const jsonUrl = url.includes('fmt=') ? url : `${url}&fmt=json3`;
+      const response = await axios.get(jsonUrl, { headers: requestHeaders });
+      const jsonLines = parseTranscriptJson3(response.data);
+      if (jsonLines.length) {
+        console.log('Manual scrape JSON3 lines:', jsonLines.length);
+        return jsonLines;
+      }
+    } catch (jsonError) {
+      console.warn('Manual scrape JSON3 failed:', jsonError.message);
+    }
+  }
   if (!lines.length) {
     throw new Error('Manual scrape returned empty transcript.');
   }

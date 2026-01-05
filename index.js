@@ -66,6 +66,45 @@ app.get('/debug', (req, res) => {
 });
 
 /**
+ * GET /api/transcript
+ * Fetches captions for a YouTube video using the internal transcript fetcher.
+ *
+ * Query:
+ *   videoId (string): The YouTube video ID (required).
+ *   lang (string): Optional language code (default: "en").
+ */
+app.get('/api/transcript', async (req, res) => {
+  try {
+    const { videoId, lang = 'en' } = req.query;
+    if (!videoId) {
+      return res.status(400).json({ error: 'videoId required' });
+    }
+
+    const lines = await fetchTranscript(videoId, lang);
+    if (!lines || lines.length === 0) {
+      return res.status(404).json({ error: 'No captions found' });
+    }
+
+    res.json({
+      videoId,
+      lang,
+      captions: lines.map(line => ({
+        start: line.start,
+        duration: line.dur,
+        text: line.text,
+      })),
+    });
+  } catch (err) {
+    const message = err.message || 'Failed to fetch transcript';
+    if (/no captiontracks|captions|transcript/i.test(message)) {
+      return res.status(404).json({ error: message });
+    }
+    console.error('Error in /api/transcript:', err);
+    res.status(500).json({ error: 'Failed to fetch transcript' });
+  }
+});
+
+/**
  * POST /transcript
  * Retrieves full video info and timestamped captions (subtitles) in all available languages.
  * 
