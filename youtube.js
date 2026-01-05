@@ -2,6 +2,25 @@ const axios = require('axios');
 const TranscriptAPI = require('youtube-transcript-api');
 const ytdl = require('ytdl-core');
 const he = require('he');
+const fs = require('fs');
+const path = require('path');
+
+function loadCookieHeader() {
+  try {
+    const cookiePath = path.resolve(__dirname, 'all_cookies.txt');
+    const raw = fs.readFileSync(cookiePath, 'utf-8');
+    const cookiePairs = raw
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith('#'))
+      .map(line => line.split('\t'))
+      .filter(parts => parts.length >= 7)
+      .map(parts => `${parts[5]}=${parts[6]}`);
+    return cookiePairs.length ? cookiePairs.join('; ') : '';
+  } catch (err) {
+    return '';
+  }
+}
 
 // helper to fetch and normalize a transcript
 function parseTranscriptXml(xml) {
@@ -20,6 +39,14 @@ function parseTranscriptXml(xml) {
 }
 
 async function fetchTranscript(videoID, language) {
+  const cookieHeader = loadCookieHeader();
+  const requestHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://www.youtube.com/',
+    ...(cookieHeader ? { 'Cookie': cookieHeader } : {}),
+  };
+
   // 1) first, try the easy library
   try {
     const raw = await TranscriptAPI.getTranscript(videoID, language);
@@ -32,7 +59,9 @@ async function fetchTranscript(videoID, language) {
 
   // 2) fallback: scrape YouTube’s signed URL yourself
   console.log('>>> fallback');
-  const info = await ytdl.getBasicInfo(`https://youtube.com/watch?v=${videoID}`);
+  const info = await ytdl.getBasicInfo(`https://youtube.com/watch?v=${videoID}`, {
+    requestOptions: { headers: requestHeaders }
+  });
   const tracks = info.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
   if (!tracks.length) {
     throw new Error('No captionTracks available to scrape.');
@@ -46,13 +75,7 @@ async function fetchTranscript(videoID, language) {
   // fetch with browser-like headers
   let xml;
   try {
-    const response = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.youtube.com/',
-      }
-    });
+    const response = await axios.get(url, { headers: requestHeaders });
     xml = response.data;
   } catch (err) {
     const status = err.response?.status;
