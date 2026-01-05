@@ -26,12 +26,8 @@ async function fetchTranscript(videoID, language) {
     if (!raw.length) throw new Error('empty');
     return raw.map(({ text, start, duration }) => ({ text, start, dur: duration }));
   } catch (err) {
-    const msg = (err.message || '').toLowerCase();
-    if (!/video unavailable|captions disabled|empty/.test(msg)) {
-      // some other error (network, bad ID)… re-throw
-      throw err;
-    }
-    console.warn('⚠️ TranscriptAPI failed, falling back to manual scrape:', err.message);
+    const status = err.response?.status;
+    console.warn('⚠️ TranscriptAPI failed, falling back to manual scrape:', err.message, status ? `(status ${status})` : '');
   }
 
   // 2) fallback: scrape YouTube’s signed URL yourself
@@ -48,13 +44,21 @@ async function fetchTranscript(videoID, language) {
   const url = track.baseUrl;
 
   // fetch with browser-like headers
-  const { data: xml } = await axios.get(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': 'https://www.youtube.com/',
-    }
-  });
+  let xml;
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.youtube.com/',
+      }
+    });
+    xml = response.data;
+  } catch (err) {
+    const status = err.response?.status;
+    const details = err.response?.data || err.message;
+    throw new Error(`Manual scrape failed${status ? ` (status ${status})` : ''}: ${details}`);
+  }
   console.log('Manual scrape URL:', url);
   console.log('Raw XML length:', xml.length);
   console.log('Raw XML preview:', xml.slice(0, 300).replace(/\n/g, ''));
