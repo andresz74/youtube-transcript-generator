@@ -35,19 +35,39 @@ function cleanVttContent(content) {
   return output.join(' ');
 }
 
+function parseTranscriptJson3(json) {
+  const events = json?.events || [];
+  return events
+    .filter(event => Array.isArray(event.segs))
+    .map(event => {
+      const text = event.segs.map(seg => seg.utf8 || '').join('');
+      const start = (event.tStartMs || 0) / 1000;
+      const dur = (event.dDurationMs || 0) / 1000;
+      return { start, dur, text: text.trim() };
+    })
+    .filter(line => line.text);
+}
+
+async function readFirstFileByExtension(dirPath, ext) {
+  const files = fs.readdirSync(dirPath).filter(f => f.endsWith(ext));
+  if (files.length === 0) return null;
+  return path.join(dirPath, files[0]);
+}
+
 async function fabricFetchTranscript(videoID, lang = 'en') {
   console.log('===> fabricFetchTranscript')
   if (!videoID) throw new Error('Missing YouTube URL');
 
   const { path: tmpDirPath, cleanup } = await tmp.dir({ unsafeCleanup: true });
-  const outputPath = path.join(tmpDirPath, '%(title)s.%(ext)s');
+  const outputPath = path.join(tmpDirPath, '%(id)s.%(ext)s');
 
   const args = [
     '--cookies', path.resolve(__dirname, 'all_cookies.txt'),
+    '--js-runtimes', 'deno',
     '--write-auto-subs',
     '--sub-lang', lang,
     '--skip-download',
-    '--sub-format', 'vtt',
+    '--sub-format', 'json3/vtt',
     '--quiet',
     '--no-warnings',
     '-o', outputPath,
@@ -62,12 +82,22 @@ async function fabricFetchTranscript(videoID, lang = 'en') {
       });
     });
 
-    const files = fs.readdirSync(tmpDirPath).filter(f => f.endsWith('.vtt'));
-    if (files.length === 0) throw new Error('No VTT subtitles found');
+    const jsonPath = await readFirstFileByExtension(tmpDirPath, '.json3');
+    if (jsonPath) {
+      const content = fs.readFileSync(jsonPath, 'utf-8');
+      const parsed = parseTranscriptJson3(JSON.parse(content));
+      if (parsed.length) {
+        return parsed.map(item => item.text).join(' ');
+      }
+    }
 
-    const vttPath = path.join(tmpDirPath, files[0]);
-    const content = fs.readFileSync(vttPath, 'utf-8');
-    return cleanVttContent(content);
+    const vttPath = await readFirstFileByExtension(tmpDirPath, '.vtt');
+    if (vttPath) {
+      const content = fs.readFileSync(vttPath, 'utf-8');
+      return cleanVttContent(content);
+    }
+
+    throw new Error('No JSON3 or VTT subtitles found');
   } finally {
     cleanup();
   }
