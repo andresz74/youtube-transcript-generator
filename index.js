@@ -141,7 +141,10 @@ app.get('/api/transcript', async (req, res) => {
     const message = err.message || 'Failed to fetch transcript';
     const status = err.response?.status;
     if (status === 401 || /missing app check token/i.test(message)) {
-      return res.status(404).json({ error: 'No captions found' });
+      return res.status(404).json({
+        error: 'No captions found',
+        details: 'Legacy transcript fallback returned 401 (Missing App Check token).'
+      });
     }
     if (/no captiontracks|captions|transcript/i.test(message)) {
       return res.status(404).json({ error: message });
