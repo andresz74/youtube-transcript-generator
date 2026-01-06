@@ -6,6 +6,9 @@ const express = require('express');
 const he = require('he');
 const getSubtitles = require('youtube-captions-scraper').getSubtitles;
 const ytdl = require('ytdl-core');
+const { execFile } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const logger = require('./logger');
 const fabricFetchTranscript = require('./fabric-youtube').fabricFetchTranscript;
 const fetchTranscript = require('./youtube').fetchTranscript;
@@ -66,6 +69,46 @@ app.get('/debug', (req, res) => {
 });
 
 /**
+ * GET /health/tools
+ * Verifies tool availability and basic runtime context.
+ */
+function runCommand(command, args = []) {
+  return new Promise((resolve) => {
+    execFile(command, args, (error, stdout, stderr) => {
+      resolve({
+        ok: !error,
+        error: error ? (stderr || error.message) : null,
+        output: (stdout || stderr || '').trim(),
+      });
+    });
+  });
+}
+
+app.get('/health/tools', async (req, res) => {
+  const cookiePath = path.resolve(__dirname, 'all_cookies.txt');
+  let cookiesReadable = false;
+  try {
+    fs.accessSync(cookiePath, fs.constants.R_OK);
+    cookiesReadable = true;
+  } catch (_) {
+    cookiesReadable = false;
+  }
+
+  const ytDlp = await runCommand('yt-dlp', ['--version']);
+  const deno = await runCommand('deno', ['--version']);
+
+  res.json({
+    path: process.env.PATH,
+    ytDlp,
+    deno,
+    cookies: {
+      path: cookiePath,
+      readable: cookiesReadable,
+    }
+  });
+});
+
+/**
  * GET /api/transcript
  * Fetches captions for a YouTube video using the internal transcript fetcher.
  *
@@ -96,6 +139,13 @@ app.get('/api/transcript', async (req, res) => {
     });
   } catch (err) {
     const message = err.message || 'Failed to fetch transcript';
+    const status = err.response?.status;
+    if (status === 401 || /missing app check token/i.test(message)) {
+      return res.status(404).json({
+        error: 'No captions found',
+        details: 'Legacy transcript fallback returned 401 (Missing App Check token).'
+      });
+    }
     if (/no captiontracks|captions|transcript/i.test(message)) {
       return res.status(404).json({ error: message });
     }
