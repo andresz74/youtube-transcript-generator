@@ -808,29 +808,29 @@ app.post('/smart-transcript-v2', async (req, res) => {
       || captionTracks[0];
     const languageCode = preferredTrack?.languageCode;
 
-    console.log('Transcript fetch candidates:', captionTracks.map(track => ({
+    debugLog(TRANSCRIPT_DEBUG, 'Transcript fetch candidates:', captionTracks.map(track => ({
       code: track.languageCode,
       name: track.name?.simpleText,
       kind: track.kind || 'manual',
     })));
-    console.log('Selected transcript languageCode:', languageCode);
+    debugLog(TRANSCRIPT_DEBUG, 'Selected transcript languageCode:', languageCode);
 
     let transcript = '';
     try {
       if (languageCode) {
         try {
-          console.log('Attempting fabricFetchTranscript...');
+          debugLog(TRANSCRIPT_DEBUG, 'Attempting fabricFetchTranscript...');
           transcript = await fabricFetchTranscript(videoID, languageCode);
-          console.log('fabricFetchTranscript result length:', transcript ? transcript.length : 0);
+          debugLog(TRANSCRIPT_DEBUG, 'fabricFetchTranscript result length:', transcript ? transcript.length : 0);
         } catch (fabricError) {
           console.warn('fabricFetchTranscript failed:', fabricError.message);
           console.warn(fabricError.stack || fabricError);
         }
         if (!transcript) {
           try {
-            console.log('Attempting getSubtitles fallback...');
+            debugLog(TRANSCRIPT_DEBUG, 'Attempting getSubtitles fallback...');
             const fallback = await getSubtitles({ videoID, lang: languageCode });
-            console.log('getSubtitles result items:', fallback ? fallback.length : 0);
+            debugLog(TRANSCRIPT_DEBUG, 'getSubtitles result items:', fallback ? fallback.length : 0);
             if (!fallback || fallback.length === 0) {
               throw new Error('getSubtitles returned empty result');
             }
@@ -845,9 +845,9 @@ app.post('/smart-transcript-v2', async (req, res) => {
       }
     } catch (transcriptError) {
       try {
-        console.log('Attempting getSubtitles fallback after error...');
+        debugLog(TRANSCRIPT_DEBUG, 'Attempting getSubtitles fallback after error...');
         const fallback = await getSubtitles({ videoID, lang: languageCode });
-        console.log('getSubtitles result items:', fallback ? fallback.length : 0);
+        debugLog(TRANSCRIPT_DEBUG, 'getSubtitles result items:', fallback ? fallback.length : 0);
         if (!fallback || fallback.length === 0) {
           throw new Error('getSubtitles returned empty result');
         }
@@ -862,9 +862,9 @@ app.post('/smart-transcript-v2', async (req, res) => {
 
     if (!transcript) {
       try {
-        console.log('Attempting fetchTranscript scrape fallback...');
+        debugLog(TRANSCRIPT_DEBUG, 'Attempting fetchTranscript scrape fallback...');
         const lines = await fetchTranscript(videoID, languageCode || 'en');
-        console.log('fetchTranscript result items:', lines ? lines.length : 0);
+        debugLog(TRANSCRIPT_DEBUG, 'fetchTranscript result items:', lines ? lines.length : 0);
         transcript = lines.map(item => item.text).join(' ');
       } catch (scrapeError) {
         console.warn('Transcript scrape failed:', scrapeError.message);
@@ -963,6 +963,42 @@ const modelUrls = {
 
 const MODEL_TIMEOUT_MS = 120000;
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+const TRANSCRIPT_DEBUG = process.env.TRANSCRIPT_DEBUG === 'true';
+const SUMMARY_DEBUG = process.env.SUMMARY_DEBUG === 'true';
+
+function debugLog(enabled, ...args) {
+  if (enabled) {
+    console.log(...args);
+  }
+}
+
+function buildTagsFromText(text) {
+  const stopwords = new Set([
+    'the', 'and', 'for', 'with', 'that', 'this', 'from', 'your', 'you', 'are',
+    'was', 'were', 'has', 'have', 'had', 'not', 'but', 'its', 'into', 'their',
+    'they', 'them', 'then', 'than', 'also', 'over', 'more', 'less', 'very',
+    'been', 'being', 'when', 'where', 'what', 'which', 'who', 'why', 'how',
+    'can', 'could', 'will', 'would', 'should', 'about', 'after', 'before',
+    'because', 'there', 'here', 'these', 'those', 'just', 'like', 'make',
+    'made', 'most', 'such', 'some', 'only', 'much', 'many', 'yourself',
+  ]);
+
+  const counts = new Map();
+  const words = (text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length >= 4 && !stopwords.has(word));
+
+  for (const word of words) {
+    counts.set(word, (counts.get(word) || 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([word]) => word);
+}
 
 async function postWithRetry(url, payload, options = {}) {
   const maxAttempts = options.maxAttempts || 3;
@@ -1140,7 +1176,7 @@ app.post('/smart-summary-firebase', async (req, res) => {
     const response = await axios.post(modelUrl, {
       videoID  // Only send the video ID
     });
-    console.log('Response from model:', response.data);
+    debugLog(SUMMARY_DEBUG, 'Response from model:', response.data);
 
     const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
 
@@ -1345,7 +1381,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     }
 
     const metadata = transcriptSnap.data();
-    const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
+    let tags = Array.isArray(metadata.tags) ? metadata.tags : [];
 
     // Ensure model is valid
     const modelUrl = modelUrls[model];
@@ -1363,7 +1399,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
       console.error('Model request failed:', status, details);
       return res.status(502).json({ message: 'Model request failed', status, details });
     }
-    console.log('Response from model:', response.data);
+    debugLog(SUMMARY_DEBUG, 'Response from model:', response.data);
 
     const summary = model === 'anthropic'
       ? response.data.content?.[0]?.text
@@ -1372,6 +1408,11 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     if (!summary) {
       return res.status(500).json({ message: 'Model did not return a summary' });
     }
+    if (tags.length === 0) {
+      const tagSource = [metadata.title, metadata.description, summary].filter(Boolean).join(' ');
+      tags = buildTagsFromText(tagSource);
+    }
+
     const rawDescription = metadata.description || '';
     const yamlSafeDescription = '|\n' + rawDescription
       .replace(/\r\n/g, '\n') // Normalize Windows newlines
