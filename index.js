@@ -139,6 +139,10 @@ app.get('/api/transcript', async (req, res) => {
     });
   } catch (err) {
     const message = err.message || 'Failed to fetch transcript';
+    const status = err.response?.status;
+    if (status === 401 || /missing app check token/i.test(message)) {
+      return res.status(404).json({ error: 'No captions found' });
+    }
     if (/no captiontracks|captions|transcript/i.test(message)) {
       return res.status(404).json({ error: message });
     }
