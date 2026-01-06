@@ -29,3 +29,4 @@ ecosystem.config.js
 
 endpoint.log
 all_cookies.txt
+*.json3

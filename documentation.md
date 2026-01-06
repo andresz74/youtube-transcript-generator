@@ -6,6 +6,11 @@
 
 This Express-based service fetches YouTube video information (metadata) and transcripts (subtitles) in any available language. It uses the `ytdl-core` library to extract video metadata and the `youtube-captions-scraper` library to retrieve subtitles. Firebase Firestore is used to cache the results (transcripts and summaries) to prevent repetitive fetching and improve performance.
 
+**Runtime notes**
+- `yt-dlp` is used for transcript extraction.
+- `deno` is required for yt-dlp JS challenges.
+- `all_cookies.txt` (Netscape format) must be present at the project root.
+
 ---
 
 ## **Service Endpoints**
@@ -13,7 +18,7 @@ This Express-based service fetches YouTube video information (metadata) and tran
 ### 1. **POST `/smart-transcript-v2`**
 
 **Description**
-Checks Firestore for a transcript of the YouTube video. If missing, fetches transcript, title, description, date, image, inferred tags, and stores them all in Firestore.
+Checks Firestore for a transcript of the YouTube video. If missing, fetches transcript (yt-dlp/json3 + fallbacks), title, description, date, image, inferred tags, and stores them all in Firestore.
 
 **Request Body:**
 
@@ -182,11 +187,32 @@ This endpoint returns a simplified version of the transcript, which includes the
 
 
 
-Perfect — here’s a clean and concise version for **API docs / OpenAPI / Swagger style documentation**:
+### 5. **GET `/api/transcript`**
+
+**Description**
+Fetches captions for a YouTube video using the internal transcript fetcher.
+
+**Request Query:**
+
+```
+/api/transcript?videoId=VIDEO_ID&lang=en
+```
+
+**Response 200:**
+
+```json
+{
+  "videoId": "VIDEO_ID",
+  "lang": "en",
+  "captions": [
+    { "start": 0, "duration": 3.2, "text": "Hello world" }
+  ]
+}
+```
 
 ---
 
-### 5. **POST `/simple-transcript-v3`**
+### 6. **POST `/simple-transcript-v3`**
 
 **Description**
 Fetches and returns the transcript of a YouTube video in a requested language (or default language if not specified). Caches transcripts per language for faster future access.
@@ -247,7 +273,7 @@ Fetches and returns the transcript of a YouTube video in a requested language (o
 
 ---
 
-### 6. **POST `/smart-transcript`**
+### 7. **POST `/smart-transcript`**
 
 This endpoint checks Firestore for an existing transcript for the specified YouTube video. If it exists, the cached version is returned. If not, it fetches the transcript, stores it in Firestore, and returns the result.
 
@@ -279,7 +305,7 @@ This endpoint checks Firestore for an existing transcript for the specified YouT
 
 ---
 
-### 7. **POST `/smart-summary`**
+### 8. **POST `/smart-summary`**
 
 This endpoint checks Firestore for a summary of the specified YouTube video. If a summary exists, it is returned from the cache. If not, the service uses the provided transcript (or fetches it from YouTube) and generates a summary using a model (e.g., ChatGPT).
 
@@ -311,7 +337,7 @@ This endpoint checks Firestore for a summary of the specified YouTube video. If 
 
 ---
 
-### 8. **POST `/smart-summary-firebase`**
+### 9. **POST `/smart-summary-firebase`**
 
 This endpoint operates similarly to `/smart-summary`, but it offloads the summary generation and caching to Firestore itself. It sends only the video ID to a model to generate the summary, stores it in Firestore, and returns the summary.
 
@@ -341,7 +367,7 @@ This endpoint operates similarly to `/smart-summary`, but it offloads the summar
 
 ---
 
-### 9. **GET `/health`**
+### 10. **GET `/health`**
 
 A simple health check endpoint to verify that the service is running.
 
@@ -353,7 +379,7 @@ OK
 
 ---
 
-### 10. **GET `/debug`**
+### 11. **GET `/debug`**
 
 A debug endpoint that returns the IP address and region of the requestor.
 
@@ -371,7 +397,7 @@ A debug endpoint that returns the IP address and region of the requestor.
 
 ---
 
-### 11. **POST `/smart-summary-firebase-v3`**
+### 12. **POST `/smart-summary-firebase-v3`**
 
 This endpoint enhances `/smart-summary-firebase-v2` by retrieving rich metadata (e.g., category, video author, published date) from Firestore. It generates a structured summary using an external model endpoint and wraps the result in a Markdown document with YAML frontmatter. The summary is then cached in Firestore for future requests.
 
@@ -403,6 +429,7 @@ This endpoint enhances `/smart-summary-firebase-v2` by retrieving rich metadata 
 - Adds extended metadata to the summary frontmatter (e.g., video_author, published_date, video_id, etc.).
 - Sends only the videoID to the AI endpoint for summary generation.
 - Stores result in summaries collection in Firestore.
+- Generates tags from title/description/summary when none exist.
 
 ---
 
@@ -419,6 +446,41 @@ The service uses Firebase Firestore to cache transcripts and summaries for YouTu
 
 ## **Usage with Firebase**
 
+---
+
+## **Environment Flags**
+
+- `TRANSCRIPT_DEBUG=true` enables verbose transcript fetch logs.
+- `SUMMARY_DEBUG=true` enables verbose model response logs.
+
+---
+
+## **Troubleshooting**
+
+- **Empty transcripts**: Ensure `all_cookies.txt` is fresh, `yt-dlp` is up to date, and `deno` is installed. Re-run a local check:
+  ```bash
+  yt-dlp --cookies all_cookies.txt --js-runtimes deno --list-subs "https://www.youtube.com/watch?v=VIDEO_ID"
+  ```
+- **yt-dlp missing**: Install or update from the official release and ensure `/usr/local/bin` is in `PATH`.
+- **Verbose logs**: Set `TRANSCRIPT_DEBUG=true` or `SUMMARY_DEBUG=true` in `.env`.
+
+---
+
+## **Operational Checklist**
+
+- Refresh `all_cookies.txt` on the same server where PM2 runs.
+- Verify `yt-dlp --version` and `yt-dlp --list-subs` work from the server.
+- Confirm `deno` is installed and usable by `yt-dlp --js-runtimes deno`.
+- Restart PM2 after any cookie or dependency changes.
+
+---
+
+## **Security Notes**
+
+- Never commit `all_cookies.txt` or `firebaseServiceAccount.json`.
+- Rotate YouTube cookies if they are ever exposed in logs or chat.
+- Treat `.env` and any model endpoint URLs as secrets.
+
 Before using the Firebase caching system, you must set up Firebase Firestore and create a service account key:
 
 1. **Create a Firebase Project** and enable Firestore.
@@ -427,4 +489,3 @@ Before using the Firebase caching system, you must set up Firebase Firestore and
 4. **Ensure that Firestore is enabled** for your Firebase project.
 
 ---
-

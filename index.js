@@ -66,6 +66,45 @@ app.get('/debug', (req, res) => {
 });
 
 /**
+ * GET /api/transcript
+ * Fetches captions for a YouTube video using the internal transcript fetcher.
+ *
+ * Query:
+ *   videoId (string): The YouTube video ID (required).
+ *   lang (string): Optional language code (default: "en").
+ */
+app.get('/api/transcript', async (req, res) => {
+  try {
+    const { videoId, lang = 'en' } = req.query;
+    if (!videoId) {
+      return res.status(400).json({ error: 'videoId required' });
+    }
+
+    const lines = await fetchTranscript(videoId, lang);
+    if (!lines || lines.length === 0) {
+      return res.status(404).json({ error: 'No captions found' });
+    }
+
+    res.json({
+      videoId,
+      lang,
+      captions: lines.map(line => ({
+        start: line.start,
+        duration: line.dur,
+        text: line.text,
+      })),
+    });
+  } catch (err) {
+    const message = err.message || 'Failed to fetch transcript';
+    if (/no captiontracks|captions|transcript/i.test(message)) {
+      return res.status(404).json({ error: message });
+    }
+    console.error('Error in /api/transcript:', err);
+    res.status(500).json({ error: 'Failed to fetch transcript' });
+  }
+});
+
+/**
  * POST /transcript
  * Retrieves full video info and timestamped captions (subtitles) in all available languages.
  * 
@@ -750,7 +789,10 @@ app.post('/smart-transcript-v2', async (req, res) => {
     const doc = await docRef.get();
     if (doc.exists) {
       console.log(`Transcript found in Firebase for ${videoID}`);
-      return res.json(doc.data());
+      const cached = doc.data();
+      if (cached?.transcript) {
+        return res.json(cached);
+      }
     }
 
     const videoInfo = await ytdl.getBasicInfo(url);
@@ -761,26 +803,72 @@ app.post('/smart-transcript-v2', async (req, res) => {
     if (captionTracks.length === 0) {
       return res.status(404).json({ message: 'No captions available for this video.' });
     }
-    const languageCode = captionTracks[0]?.languageCode;
+    const preferredTrack = captionTracks.find(track => track.languageCode?.startsWith('en') && track.kind !== 'asr')
+      || captionTracks.find(track => track.languageCode?.startsWith('en'))
+      || captionTracks[0];
+    const languageCode = preferredTrack?.languageCode;
+
+    debugLog(TRANSCRIPT_DEBUG, 'Transcript fetch candidates:', captionTracks.map(track => ({
+      code: track.languageCode,
+      name: track.name?.simpleText,
+      kind: track.kind || 'manual',
+    })));
+    debugLog(TRANSCRIPT_DEBUG, 'Selected transcript languageCode:', languageCode);
 
     let transcript = '';
     try {
       if (languageCode) {
-        transcript = await fabricFetchTranscript(videoID, languageCode);
+        try {
+          debugLog(TRANSCRIPT_DEBUG, 'Attempting fabricFetchTranscript...');
+          transcript = await fabricFetchTranscript(videoID, languageCode);
+          debugLog(TRANSCRIPT_DEBUG, 'fabricFetchTranscript result length:', transcript ? transcript.length : 0);
+        } catch (fabricError) {
+          console.warn('fabricFetchTranscript failed:', fabricError.message);
+          console.warn(fabricError.stack || fabricError);
+        }
         if (!transcript) {
-          const fallback = await getSubtitles({ videoID, lang: languageCode });
-          transcript = fallback.map(item => item.text).join(' ');
+          try {
+            debugLog(TRANSCRIPT_DEBUG, 'Attempting getSubtitles fallback...');
+            const fallback = await getSubtitles({ videoID, lang: languageCode });
+            debugLog(TRANSCRIPT_DEBUG, 'getSubtitles result items:', fallback ? fallback.length : 0);
+            if (!fallback || fallback.length === 0) {
+              throw new Error('getSubtitles returned empty result');
+            }
+            transcript = fallback.map(item => item.text).join(' ');
+          } catch (subtitlesError) {
+            console.warn('getSubtitles failed:', subtitlesError.message);
+            console.warn(subtitlesError.stack || subtitlesError);
+          }
         }
       } else {
         console.warn('No caption language available.');
       }
     } catch (transcriptError) {
       try {
+        debugLog(TRANSCRIPT_DEBUG, 'Attempting getSubtitles fallback after error...');
         const fallback = await getSubtitles({ videoID, lang: languageCode });
+        debugLog(TRANSCRIPT_DEBUG, 'getSubtitles result items:', fallback ? fallback.length : 0);
+        if (!fallback || fallback.length === 0) {
+          throw new Error('getSubtitles returned empty result');
+        }
         transcript = fallback.map(item => item.text).join(' ');
       } catch (fallbackError) {
         console.warn('Transcript fetch failed:', transcriptError.message);
         console.warn('Transcript fallback failed:', fallbackError.message);
+        console.warn(transcriptError.stack || transcriptError);
+        console.warn(fallbackError.stack || fallbackError);
+      }
+    }
+
+    if (!transcript) {
+      try {
+        debugLog(TRANSCRIPT_DEBUG, 'Attempting fetchTranscript scrape fallback...');
+        const lines = await fetchTranscript(videoID, languageCode || 'en');
+        debugLog(TRANSCRIPT_DEBUG, 'fetchTranscript result items:', lines ? lines.length : 0);
+        transcript = lines.map(item => item.text).join(' ');
+      } catch (scrapeError) {
+        console.warn('Transcript scrape failed:', scrapeError.message);
+        console.warn(scrapeError.stack || scrapeError);
       }
     }
 
@@ -872,6 +960,70 @@ const modelUrls = {
   deepseek: process.env.DEEPSEEK_VERCEL_URL,
   anthropic: process.env.ANTHROPIC_VERCEL_URL,
 };
+
+const MODEL_TIMEOUT_MS = 120000;
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+const TRANSCRIPT_DEBUG = process.env.TRANSCRIPT_DEBUG === 'true';
+const SUMMARY_DEBUG = process.env.SUMMARY_DEBUG === 'true';
+
+function debugLog(enabled, ...args) {
+  if (enabled) {
+    console.log(...args);
+  }
+}
+
+function buildTagsFromText(text) {
+  const stopwords = new Set([
+    'the', 'and', 'for', 'with', 'that', 'this', 'from', 'your', 'you', 'are',
+    'was', 'were', 'has', 'have', 'had', 'not', 'but', 'its', 'into', 'their',
+    'they', 'them', 'then', 'than', 'also', 'over', 'more', 'less', 'very',
+    'been', 'being', 'when', 'where', 'what', 'which', 'who', 'why', 'how',
+    'can', 'could', 'will', 'would', 'should', 'about', 'after', 'before',
+    'because', 'there', 'here', 'these', 'those', 'just', 'like', 'make',
+    'made', 'most', 'such', 'some', 'only', 'much', 'many', 'yourself',
+  ]);
+
+  const counts = new Map();
+  const words = (text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length >= 4 && !stopwords.has(word));
+
+  for (const word of words) {
+    counts.set(word, (counts.get(word) || 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([word]) => word);
+}
+
+async function postWithRetry(url, payload, options = {}) {
+  const maxAttempts = options.maxAttempts || 3;
+  const baseDelayMs = options.baseDelayMs || 500;
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await axios.post(url, payload, {
+        timeout: MODEL_TIMEOUT_MS,
+        ...options.axiosOptions,
+      });
+    } catch (err) {
+      lastError = err;
+      const status = err.response?.status;
+      if (!status || !RETRYABLE_STATUS_CODES.has(status) || attempt === maxAttempts) {
+        throw err;
+      }
+      const delay = baseDelayMs * Math.pow(2, attempt - 1);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
 
 app.post('/smart-summary', async (req, res) => {
   try {
@@ -1024,7 +1176,7 @@ app.post('/smart-summary-firebase', async (req, res) => {
     const response = await axios.post(modelUrl, {
       videoID  // Only send the video ID
     });
-    console.log('Response from model:', response.data);
+    debugLog(SUMMARY_DEBUG, 'Response from model:', response.data);
 
     const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
 
@@ -1229,7 +1381,7 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     }
 
     const metadata = transcriptSnap.data();
-    const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
+    let tags = Array.isArray(metadata.tags) ? metadata.tags : [];
 
     // Ensure model is valid
     const modelUrl = modelUrls[model];
@@ -1238,16 +1390,29 @@ app.post('/smart-summary-firebase-v3', async (req, res) => {
     }
 
     // 🧠 Call your deployed endpoint that returns the summary
-    const response = await axios.post(modelUrl, {
-      videoID,
-    }, { timeout: 120000 });
-    console.log('Response from model:', response.data.choices);
+    let response;
+    try {
+      response = await postWithRetry(modelUrl, { videoID }, { maxAttempts: 3, baseDelayMs: 750 });
+    } catch (err) {
+      const status = err.response?.status || 502;
+      const details = err.response?.data || err.message;
+      console.error('Model request failed:', status, details);
+      return res.status(502).json({ message: 'Model request failed', status, details });
+    }
+    debugLog(SUMMARY_DEBUG, 'Response from model:', response.data);
 
-    const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
+    const summary = model === 'anthropic'
+      ? response.data.content?.[0]?.text
+      : response.data.summaryText || response.data.text;
 
     if (!summary) {
       return res.status(500).json({ message: 'Model did not return a summary' });
     }
+    if (tags.length === 0) {
+      const tagSource = [metadata.title, metadata.description, summary].filter(Boolean).join(' ');
+      tags = buildTagsFromText(tagSource);
+    }
+
     const rawDescription = metadata.description || '';
     const yamlSafeDescription = '|\n' + rawDescription
       .replace(/\r\n/g, '\n') // Normalize Windows newlines

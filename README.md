@@ -16,6 +16,9 @@ This is an Express-based service that fetches YouTube video information and tran
 
 - [Node.js](https://nodejs.org/) (version 12.x or higher)
 - [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) installed on the server
+- [deno](https://deno.com/runtime) for yt-dlp JS challenges
+- A valid `all_cookies.txt` (Netscape format) for YouTube requests
 
 ## Installation
 
@@ -42,9 +45,12 @@ This is an Express-based service that fetches YouTube video information and tran
    ```env
    PORT=3004
    CHATGPT_VERCEL_URL=https://xxxxxxxxxx.vercel.app/api/openai-chat
+   TRANSCRIPT_DEBUG=false
+   SUMMARY_DEBUG=false
    ```
 
 5. Create a Firebase service account key file as `firebaseServiceAccount.json` (not committed to Git). Make sure you’ve set up Firestore.
+6. Add `all_cookies.txt` in the project root (do not commit it).
 
 ## Usage
 
@@ -61,6 +67,28 @@ pm2 start ecosystem.config.js
 ```
 
 ## API Endpoints
+
+### ✅ GET `/api/transcript`
+
+Fetches captions for a YouTube video using the internal transcript fetcher (cookie + JS runtime aware).
+
+**Request:**
+
+```
+/api/transcript?videoId=VIDEO_ID&lang=en
+```
+
+**Response:**
+
+```json
+{
+  "videoId": "VIDEO_ID",
+  "lang": "en",
+  "captions": [
+    { "start": 0, "duration": 3.2, "text": "Hello world" }
+  ]
+}
+```
 
 ### ✅ POST `/transcript`
 
@@ -327,6 +355,7 @@ Generates a markdown-formatted AI summary with frontmatter and tags. Caches both
 ### 🧠 POST `/smart-summary-firebase-v3`
 
 This endpoint improves upon v2 by retrieving extended video metadata from Firestore (such as category, video author, publish date) and formatting the summary as a Markdown document with a full YAML frontmatter block. The summary is cached in Firestore to avoid redundant AI calls.
+If no tags exist on the transcript, tags are generated from the title/description/summary.
 
 **Request:**
 
@@ -378,6 +407,34 @@ To monitor logs:
 ```bash
 pm2 logs youtube-transcript-generator
 ```
+
+---
+
+## Troubleshooting
+
+- **Empty transcripts**: Ensure `all_cookies.txt` is fresh, `yt-dlp` is up to date, and `deno` is installed. Re-run a local check:
+  ```bash
+  yt-dlp --cookies all_cookies.txt --js-runtimes deno --list-subs "https://www.youtube.com/watch?v=VIDEO_ID"
+  ```
+- **yt-dlp missing**: Install or update from the official release and ensure `/usr/local/bin` is in `PATH`.
+- **Verbose logs**: Set `TRANSCRIPT_DEBUG=true` or `SUMMARY_DEBUG=true` in `.env`.
+
+---
+
+## Operational Checklist
+
+- Refresh `all_cookies.txt` on the same server where PM2 runs.
+- Verify `yt-dlp --version` and `yt-dlp --list-subs` work from the server.
+- Confirm `deno` is installed and usable by `yt-dlp --js-runtimes deno`.
+- Restart PM2 after any cookie or dependency changes.
+
+---
+
+## Security Notes
+
+- Never commit `all_cookies.txt` or `firebaseServiceAccount.json`.
+- Rotate YouTube cookies if they are ever exposed in logs or chat.
+- Treat `.env` and any model endpoint URLs as secrets.
 
 ---
 
