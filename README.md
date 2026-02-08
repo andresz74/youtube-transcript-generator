@@ -45,6 +45,7 @@ This is an Express-based service that fetches YouTube video information and tran
    ```env
    PORT=3004
    CHATGPT_VERCEL_URL=https://xxxxxxxxxx.vercel.app/api/openai-chat
+   API_ACCESS_KEY=your-shared-api-access-key
    TRANSCRIPT_DEBUG=false
    SUMMARY_DEBUG=false
    ```
@@ -395,7 +396,8 @@ module.exports = {
       watch: false,
       env: {
         PORT: 3004,
-        CHATGPT_VERCEL_URL: 'https://your-vercel-url/api/openai-chat'
+        CHATGPT_VERCEL_URL: 'https://your-vercel-url/api/openai-chat',
+        API_ACCESS_KEY: 'your-shared-api-access-key'
       }
     }
   ]
@@ -418,6 +420,7 @@ pm2 logs youtube-transcript-generator
   ```
 - **yt-dlp missing**: Install or update from the official release and ensure `/usr/local/bin` is in `PATH`.
 - **Verbose logs**: Set `TRANSCRIPT_DEBUG=true` or `SUMMARY_DEBUG=true` in `.env`.
+- **401 from model endpoints**: Ensure `API_ACCESS_KEY` matches one of the keys configured in `ai-access` (`API_ACCESS_KEYS`).
 
 ---
 

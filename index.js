@@ -1015,11 +1015,32 @@ const MODEL_TIMEOUT_MS = 120000;
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const TRANSCRIPT_DEBUG = process.env.TRANSCRIPT_DEBUG === 'true';
 const SUMMARY_DEBUG = process.env.SUMMARY_DEBUG === 'true';
+const MODEL_API_ACCESS_KEY = process.env.API_ACCESS_KEY;
+
+if (!MODEL_API_ACCESS_KEY) {
+  console.warn('API_ACCESS_KEY is not set. Requests to protected model APIs may fail with 401.');
+}
 
 function debugLog(enabled, ...args) {
   if (enabled) {
     console.log(...args);
   }
+}
+
+function buildModelRequestHeaders(headers = {}) {
+  const mergedHeaders = {
+    'Content-Type': 'application/json',
+    ...headers,
+  };
+
+  if (MODEL_API_ACCESS_KEY) {
+    mergedHeaders['X-API-Key'] = MODEL_API_ACCESS_KEY;
+    if (!mergedHeaders.Authorization && !mergedHeaders.authorization) {
+      mergedHeaders.Authorization = `Bearer ${MODEL_API_ACCESS_KEY}`;
+    }
+  }
+
+  return mergedHeaders;
 }
 
 function buildTagsFromText(text) {
@@ -1053,13 +1074,15 @@ function buildTagsFromText(text) {
 async function postWithRetry(url, payload, options = {}) {
   const maxAttempts = options.maxAttempts || 3;
   const baseDelayMs = options.baseDelayMs || 500;
+  const axiosOptions = options.axiosOptions || {};
   let lastError;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       return await axios.post(url, payload, {
         timeout: MODEL_TIMEOUT_MS,
-        ...options.axiosOptions,
+        ...axiosOptions,
+        headers: buildModelRequestHeaders(axiosOptions.headers),
       });
     } catch (err) {
       lastError = err;
@@ -1155,7 +1178,7 @@ app.post('/smart-summary', async (req, res) => {
       modelUrl,
       { chatGptMessages },
       {
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildModelRequestHeaders(),
         timeout: 120000, // Timeout in milliseconds (e.g., 120 seconds)
       }
     );
@@ -1223,9 +1246,16 @@ app.post('/smart-summary-firebase', async (req, res) => {
       return res.status(400).json({ message: 'Invalid model specified' });
     }
 
-    const response = await axios.post(modelUrl, {
-      videoID  // Only send the video ID
-    });
+    const response = await axios.post(
+      modelUrl,
+      {
+        videoID, // Only send the video ID
+      },
+      {
+        headers: buildModelRequestHeaders(),
+        timeout: MODEL_TIMEOUT_MS,
+      }
+    );
     debugLog(SUMMARY_DEBUG, 'Response from model:', response.data);
 
     const summary = model === 'anthropic' ? response.data.content?.[0]?.text : response.data.choices?.[0]?.message?.content;
@@ -1303,9 +1333,16 @@ app.post('/smart-summary-firebase-v2', async (req, res) => {
     }
 
     // 🧠 Call your deployed endpoint that returns both summary and tags
-    const response = await axios.post(modelUrl, {
-      videoID,
-    });
+    const response = await axios.post(
+      modelUrl,
+      {
+        videoID,
+      },
+      {
+        headers: buildModelRequestHeaders(),
+        timeout: MODEL_TIMEOUT_MS,
+      }
+    );
 
     const plainSummary = response.data.summary?.choices?.[0]?.message?.content;
     const tags = response.data.tags || [];

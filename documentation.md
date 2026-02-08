@@ -10,6 +10,7 @@ This Express-based service fetches YouTube video information (metadata) and tran
 - `yt-dlp` is used for transcript extraction.
 - `deno` is required for yt-dlp JS challenges.
 - `all_cookies.txt` (Netscape format) must be present at the project root.
+- Set `API_ACCESS_KEY` in this service to authenticate model requests against the `ai-access` API (`X-API-Key`/Bearer).
 
 ---
 
