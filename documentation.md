@@ -11,6 +11,10 @@ This Express-based service fetches YouTube video information (metadata) and tran
 - `deno` is required for yt-dlp JS challenges.
 - `all_cookies.txt` (Netscape format) must be present at the project root.
 - Set `API_ACCESS_KEY` in this service to authenticate model requests against the `ai-access` API (`X-API-Key`/Bearer).
+- `/smart-summary-firebase-v3` has transcript safeguards:
+  - controlled `413` JSON for oversized transcript requests
+  - per-stage timeout/retry
+  - chunked summarization for large-but-valid transcripts
 
 ---
 

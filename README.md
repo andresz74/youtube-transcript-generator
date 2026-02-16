@@ -46,6 +46,13 @@ This is an Express-based service that fetches YouTube video information and tran
    PORT=3004
    CHATGPT_VERCEL_URL=https://xxxxxxxxxx.vercel.app/api/openai-chat
    API_ACCESS_KEY=your-shared-api-access-key
+   SMART_SUMMARY_MAX_TRANSCRIPT_CHARS=300000
+   SMART_SUMMARY_DIRECT_MAX_CHARS=24000
+   SMART_SUMMARY_CHUNK_TARGET_CHARS=8000
+   SMART_SUMMARY_CHUNK_OVERLAP_CHARS=200
+   SMART_SUMMARY_MAX_CHUNKS=32
+   SMART_SUMMARY_STAGE_TIMEOUT_MS=25000
+   SMART_SUMMARY_STAGE_RETRIES=1
    TRANSCRIPT_DEBUG=false
    SUMMARY_DEBUG=false
    ```
@@ -421,6 +428,8 @@ pm2 logs youtube-transcript-generator
 - **yt-dlp missing**: Install or update from the official release and ensure `/usr/local/bin` is in `PATH`.
 - **Verbose logs**: Set `TRANSCRIPT_DEBUG=true` or `SUMMARY_DEBUG=true` in `.env`.
 - **401 from model endpoints**: Ensure `API_ACCESS_KEY` matches one of the keys configured in `ai-access` (`API_ACCESS_KEYS`).
+- **413 on `/smart-summary-firebase-v3`**: Transcript exceeded `SMART_SUMMARY_MAX_TRANSCRIPT_CHARS`.
+- **Large transcript reliability**: `/smart-summary-firebase-v3` now uses direct mode for small transcripts and chunked hierarchical mode for large-but-valid transcripts.
 
 ---
 
