@@ -1243,7 +1243,11 @@ app.post('/smart-summary-firebase', async (req, res) => {
       }
     }
 
-    // Send only the video ID to the Vercel endpoint to fetch the transcript from Firestore and summarize it
+    const transcriptRef = db.collection('transcripts').doc(videoID);
+    const transcriptSnap = await transcriptRef.get();
+    const transcriptText = transcriptSnap.exists ? (transcriptSnap.data()?.transcript || '') : '';
+
+    // Send transcript when available to avoid dependency on upstream Firestore lookup
     const modelUrl = modelUrls[model];
     console.log('Model URL:', modelUrl);
     if (!modelUrl) {
@@ -1253,7 +1257,8 @@ app.post('/smart-summary-firebase', async (req, res) => {
     const response = await axios.post(
       modelUrl,
       {
-        videoID, // Only send the video ID
+        videoID,
+        ...(transcriptText ? { transcript: transcriptText } : {}),
       },
       {
         headers: buildModelRequestHeaders(),
@@ -1341,6 +1346,7 @@ app.post('/smart-summary-firebase-v2', async (req, res) => {
       modelUrl,
       {
         videoID,
+        ...(metadata.transcript ? { transcript: metadata.transcript } : {}),
       },
       {
         headers: buildModelRequestHeaders(),
