@@ -382,6 +382,24 @@ If no tags exist on the transcript, tags are generated from the title/descriptio
   "fromCache": false
 }
 ```
+
+### ✅ POST `/smart-summary-firebase-v3/async`
+
+Queues summary generation and returns immediately. Use this from UIs to avoid client timeouts on long videos.
+
+**Response (202):**
+
+```json
+{
+  "requestId": "req-123",
+  "status": "queued",
+  "statusUrl": "/summary-status/req-123"
+}
+```
+
+### ✅ GET `/summary-status/:requestId`
+
+Polls async summary status and returns `queued`, `processing`, `succeeded` (with `result.summary`), or `failed` (with structured error).
 ---
 
 ## PM2 Notes
