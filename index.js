@@ -12,6 +12,10 @@ const path = require('path');
 const logger = require('./logger');
 const fabricFetchTranscript = require('./fabric-youtube').fabricFetchTranscript;
 const fetchTranscript = require('./youtube').fetchTranscript;
+const {
+  createSmartSummaryV3Handler,
+  smartSummaryJsonErrorHandler,
+} = require('./lib/smart-summary-v3');
 
 // Firebase Admin SDK
 const admin = require('firebase-admin');
@@ -28,7 +32,10 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));  // Adjust this value as needed
 
 app.use((req, res, next) => {
-  console.log('Request size:', req.headers['content-length']);  // Log the content-length of each request
+  if (req.method !== 'GET') {
+    const requestSize = req.headers['content-length'] || 'unknown';
+    console.log('Request size:', requestSize);
+  }
   next();
 });
 
@@ -1239,7 +1246,11 @@ app.post('/smart-summary-firebase', async (req, res) => {
       }
     }
 
-    // Send only the video ID to the Vercel endpoint to fetch the transcript from Firestore and summarize it
+    const transcriptRef = db.collection('transcripts').doc(videoID);
+    const transcriptSnap = await transcriptRef.get();
+    const transcriptText = transcriptSnap.exists ? (transcriptSnap.data()?.transcript || '') : '';
+
+    // Send transcript when available to avoid dependency on upstream Firestore lookup
     const modelUrl = modelUrls[model];
     console.log('Model URL:', modelUrl);
     if (!modelUrl) {
@@ -1249,7 +1260,8 @@ app.post('/smart-summary-firebase', async (req, res) => {
     const response = await axios.post(
       modelUrl,
       {
-        videoID, // Only send the video ID
+        videoID,
+        ...(transcriptText ? { transcript: transcriptText } : {}),
       },
       {
         headers: buildModelRequestHeaders(),
@@ -1337,6 +1349,7 @@ app.post('/smart-summary-firebase-v2', async (req, res) => {
       modelUrl,
       {
         videoID,
+        ...(metadata.transcript ? { transcript: metadata.transcript } : {}),
       },
       {
         headers: buildModelRequestHeaders(),
@@ -1434,119 +1447,19 @@ author: ${metadata.author}
  *   message: string
  * }
  */
-app.post('/smart-summary-firebase-v3', async (req, res) => {
-  try {
-    const { url, model } = req.body;
-    if (!url) return res.status(400).json({ message: 'URL is required' });
-    if (!model) return res.status(400).json({ message: 'Model is required' });
-
-    let videoID;
-    try {
-      videoID = ytdl.getURLVideoID(url);
-    } catch (err) {
-      return res.status(400).json({ message: 'Invalid YouTube URL' });
-    }
-    console.log('>>> videoID', videoID);
-    const db = admin.firestore();
-    const summariesRef = db.collection('summaries').doc(videoID);
-    const transcriptRef = db.collection('transcripts').doc(videoID);
-
-    // Check if summary already exists
-    const summarySnap = await summariesRef.get();
-    if (summarySnap.exists) {
-      const data = summarySnap.data();
-      if (data.summary) {
-        console.log(`Summary found in Firebase for ${videoID}`);
-        return res.json({ summary: data.summary, fromCache: true });
-      }
-    }
-
-    // Get metadata from transcript doc
-    const transcriptSnap = await transcriptRef.get();
-    if (!transcriptSnap.exists) {
-      return res.status(404).json({ message: 'Transcript not found for this video.' });
-    }
-
-    const metadata = transcriptSnap.data();
-    let tags = Array.isArray(metadata.tags) ? metadata.tags : [];
-
-    // Ensure model is valid
-    const modelUrl = modelUrls[model];
-    if (!modelUrl) {
-      return res.status(400).json({ message: 'Invalid model specified' });
-    }
-
-    // 🧠 Call your deployed endpoint that returns the summary
-    let response;
-    try {
-      response = await postWithRetry(modelUrl, { videoID }, { maxAttempts: 3, baseDelayMs: 750 });
-    } catch (err) {
-      const status = err.response?.status || 502;
-      const details = err.response?.data || err.message;
-      console.error('Model request failed:', status, details);
-      return res.status(502).json({ message: 'Model request failed', status, details });
-    }
-    debugLog(SUMMARY_DEBUG, 'Response from model:', response.data);
-
-    const summary = model === 'anthropic'
-      ? response.data.content?.[0]?.text
-      : response.data.summaryText || response.data.text;
-
-    if (!summary) {
-      return res.status(500).json({ message: 'Model did not return a summary' });
-    }
-    if (tags.length === 0) {
-      const tagSource = [metadata.title, metadata.description, summary].filter(Boolean).join(' ');
-      tags = buildTagsFromText(tagSource);
-    }
-
-    const rawDescription = metadata.description || '';
-    const yamlSafeDescription = '|\n' + rawDescription
-      .replace(/\r\n/g, '\n') // Normalize Windows newlines
-      .split('\n')
-      .map(line => `  ${line}`) // indent all lines exactly 2 spaces
-      .join('\n');
-
-    // Construct frontmatter
-    const frontmatter = `---
-title: "${metadata.title}"
-date: ${metadata.date}
-category: ${metadata.category}
-description: ${yamlSafeDescription}
-image: '${metadata.image}'
-duration: ${metadata.duration}
-tags: 
-${tags.map(tag => `  - ${tag}`).join('\n')}
-canonical_url: ${metadata.canonical_url}
-author: ${metadata.author}
-video_author: ${metadata.video_author}
-video_url: ${metadata.video_url}
-video_id: ${videoID}
-published_date: ${metadata.published_date}
----
-![](https://www.youtube.com/watch?v=${videoID})
-# ${metadata.title}\n`;
-
-    const summaryWithFrontmatter = `${frontmatter}${summary}`;
-
-    // Save the summary to summaries collection
-    console.log(`Summary stored in Firebase for ${videoID}`);
-    await summariesRef.set(
-      {
-        summary: summaryWithFrontmatter,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        tags,
-      },
-      { merge: true }
-    );
-
-    res.json({ summary: summaryWithFrontmatter, fromCache: false });
-
-  } catch (err) {
-    console.error('Error in /smart-summary-firebase-v3:', err);
-    res.status(500).json({ message: 'Error generating smart summary' });
-  }
+const smartSummaryV3Handler = createSmartSummaryV3Handler({
+  admin,
+  ytdl,
+  modelUrls,
+  postWithRetry,
+  buildTagsFromText,
+  logger,
+  summaryDebug: SUMMARY_DEBUG,
 });
+app.post('/smart-summary-firebase-v3', smartSummaryV3Handler);
+app.post('/smart-summary-firebase-v3/async', smartSummaryV3Handler.submitAsyncHandler);
+app.get('/summary-status/:requestId', smartSummaryV3Handler.getStatusHandler);
+app.use(smartSummaryJsonErrorHandler);
 
 const port = process.env.PORT || 3000;
 app.listen(port, '0.0.0.0', () => {

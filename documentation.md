@@ -11,6 +11,10 @@ This Express-based service fetches YouTube video information (metadata) and tran
 - `deno` is required for yt-dlp JS challenges.
 - `all_cookies.txt` (Netscape format) must be present at the project root.
 - Set `API_ACCESS_KEY` in this service to authenticate model requests against the `ai-access` API (`X-API-Key`/Bearer).
+- `/smart-summary-firebase-v3` has transcript safeguards:
+  - controlled `413` JSON for oversized transcript requests
+  - per-stage timeout/retry
+  - chunked summarization for large-but-valid transcripts
 
 ---
 
@@ -428,9 +432,31 @@ This endpoint enhances `/smart-summary-firebase-v2` by retrieving rich metadata 
 ### **Highlights:**
 
 - Adds extended metadata to the summary frontmatter (e.g., video_author, published_date, video_id, etc.).
-- Sends only the videoID to the AI endpoint for summary generation.
+- Sends transcript data to the AI endpoint and uses chunked summarization for large transcripts.
 - Stores result in summaries collection in Firestore.
 - Generates tags from title/description/summary when none exist.
+
+### 13. **POST `/smart-summary-firebase-v3/async`**
+
+Queues summary generation and returns immediately so clients can poll progress.
+
+#### **Response 202:**
+
+```json
+{
+  "requestId": "req-123",
+  "status": "queued",
+  "statusUrl": "/summary-status/req-123"
+}
+```
+
+### 14. **GET `/summary-status/:requestId`**
+
+Returns current async job status:
+- `queued`
+- `processing`
+- `succeeded` with `result.summary`
+- `failed` with structured `error`
 
 ---
 
