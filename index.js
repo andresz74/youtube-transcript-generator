@@ -1454,6 +1454,8 @@ const smartSummaryV3Handler = createSmartSummaryV3Handler({
   summaryDebug: SUMMARY_DEBUG,
 });
 app.post('/smart-summary-firebase-v3', smartSummaryV3Handler);
+app.post('/smart-summary-firebase-v3/async', smartSummaryV3Handler.submitAsyncHandler);
+app.get('/summary-status/:requestId', smartSummaryV3Handler.getStatusHandler);
 app.use(smartSummaryJsonErrorHandler);
 
 const port = process.env.PORT || 3000;

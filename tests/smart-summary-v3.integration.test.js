@@ -193,3 +193,40 @@ test('large but valid transcript succeeds via chunking', async () => {
   if (prevTarget === undefined) delete process.env.SMART_SUMMARY_CHUNK_TARGET_CHARS;
   else process.env.SMART_SUMMARY_CHUNK_TARGET_CHARS = prevTarget;
 });
+
+test('async submit returns queued and status endpoint returns succeeded', async () => {
+  const transcriptDoc = {
+    title: 'Async video',
+    transcript: 'Small transcript content for async flow.',
+    description: 'desc',
+  };
+  const admin = createAdminMock(createMockFirestore({ transcriptDoc }));
+  const handler = createSmartSummaryV3Handler({
+    admin,
+    ytdl,
+    modelUrls,
+    postWithRetry: async () => ({ data: { summaryText: 'Async summary text', tags: ['tag1'] } }),
+    buildTagsFromText: () => ['fallback'],
+    logger,
+    summaryDebug: false,
+  });
+
+  const req = createReq({ url: 'https://www.youtube.com/watch?v=abc', model: 'chatgpt' });
+  req.params = {};
+  const res = createRes();
+  await handler.submitAsyncHandler(req, res);
+
+  assert.equal(res.statusCode, 202);
+  assert.equal(res.body.status, 'queued');
+  assert.ok(res.body.requestId);
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const statusReq = { params: { requestId: res.body.requestId } };
+  const statusRes = createRes();
+  await handler.getStatusHandler(statusReq, statusRes);
+
+  assert.equal(statusRes.statusCode, 200);
+  assert.equal(statusRes.body.status, 'succeeded');
+  assert.ok(statusRes.body.result);
+  assert.equal(statusRes.body.result.fromCache, false);
+});
