@@ -568,6 +568,67 @@ async function fetchTranscriptText(videoID, languageCode) {
   });
 }
 
+const TRANSCRIPT_JOB_TTL_MS = 10 * 60 * 1000;
+const TRANSCRIPT_JOB_MAX_ENTRIES = 500;
+
+function getRequestId(req) {
+  return req.headers['x-request-id']
+    || req.headers['cf-ray']
+    || req.headers['x-vercel-id']
+    || `transcript-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createTranscriptJobStore() {
+  const jobs = new Map();
+
+  const prune = () => {
+    const now = Date.now();
+    for (const [id, job] of jobs.entries()) {
+      if (now - job.updatedAt > TRANSCRIPT_JOB_TTL_MS) jobs.delete(id);
+    }
+    while (jobs.size > TRANSCRIPT_JOB_MAX_ENTRIES) {
+      const firstKey = jobs.keys().next().value;
+      jobs.delete(firstKey);
+    }
+  };
+
+  return {
+    create(id) {
+      prune();
+      const now = Date.now();
+      const job = { requestId: id, status: 'queued', createdAt: now, updatedAt: now };
+      jobs.set(id, job);
+      return job;
+    },
+    start(id) {
+      const job = jobs.get(id);
+      if (!job) return;
+      job.status = 'processing';
+      job.updatedAt = Date.now();
+    },
+    succeed(id, result) {
+      const job = jobs.get(id);
+      if (!job) return;
+      job.status = 'succeeded';
+      job.result = result;
+      job.updatedAt = Date.now();
+    },
+    fail(id, errorPayload) {
+      const job = jobs.get(id);
+      if (!job) return;
+      job.status = 'failed';
+      job.error = errorPayload;
+      job.updatedAt = Date.now();
+    },
+    get(id) {
+      prune();
+      return jobs.get(id) || null;
+    },
+  };
+}
+
+const transcriptJobStore = createTranscriptJobStore();
+
 async function safeGetVideoInfo(url, videoID = 'unknown') {
   const startTime = Date.now();
   console.log(`[transcript][${videoID}] safeGetVideoInfo start`);
@@ -583,19 +644,16 @@ async function safeGetVideoInfo(url, videoID = 'unknown') {
     throw err;
   }
 }
-app.post('/simple-transcript-v3', async (req, res) => {
+async function executeSimpleTranscriptV3(body = {}, requestId = 'sync') {
   try {
-    const { url, lang } = req.body;
+    const { url, lang } = body;
     console.log('URL:', url, ', Language:', lang);
 
     const videoID = ytdl.getURLVideoID(url);
-    console.log('===> videoID:', videoID);
+    console.log('===> videoID:', videoID, 'requestId:', requestId);
     const docRef = db.collection('transcripts-multilingual').doc(videoID);
     const doc = await docRef.get();
 
-    // ------------------------------
-    // If cached transcript exists → use it
-    // ------------------------------
     if (doc.exists) {
       console.log(`Transcript found in Firebase for ${videoID}`);
       const cached = doc.data();
@@ -603,85 +661,82 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
       let cachedTranscript = null;
 
-      // Find exact or prefix match if lang is provided
       if (lang) {
         cachedTranscript = cached.transcript.find(t => t.language === lang)
           || cached.transcript.find(t => t.language.startsWith(lang));
       }
 
       if (!lang) {
-        // No lang requested → fallback to first cached transcript
         cachedTranscript = cached.transcript[0];
-
-        return res.json({
-          videoID: cached.videoID,
-          duration: cached.duration,
-          title: cachedTranscript.title,
-          transcript: cachedTranscript.transcript,
-          transcriptLanguageCode: cachedTranscript.language,
-          languages: availableLanguages.length > 0 ? availableLanguages : undefined
-        });
+        return {
+          status: 200,
+          body: {
+            videoID: cached.videoID,
+            duration: cached.duration,
+            title: cachedTranscript.title,
+            transcript: cachedTranscript.transcript,
+            transcriptLanguageCode: cachedTranscript.language,
+            languages: availableLanguages.length > 0 ? availableLanguages : undefined,
+          },
+        };
       }
 
       if (cachedTranscript) {
-        // Lang requested and cached → return cached
-        return res.json({
-          videoID: cached.videoID,
-          duration: cached.duration,
-          title: cachedTranscript.title,
-          transcript: cachedTranscript.transcript,
-          transcriptLanguageCode: cachedTranscript.language,
-          languages: availableLanguages.length > 0 ? availableLanguages : undefined
-        });
+        return {
+          status: 200,
+          body: {
+            videoID: cached.videoID,
+            duration: cached.duration,
+            title: cachedTranscript.title,
+            transcript: cachedTranscript.transcript,
+            transcriptLanguageCode: cachedTranscript.language,
+            languages: availableLanguages.length > 0 ? availableLanguages : undefined,
+          },
+        };
       }
 
-      // 🚨 Lang requested and NOT cached → FETCH FROM YOUTUBE
       const videoInfoStart = Date.now();
       const videoInfo = await safeGetVideoInfo(url, videoID);
       logStage(videoID, 'cache-miss language video info completed in', videoInfoStart);
       if (!videoInfo) {
-        return res.status(403).json({ message: 'This is a private video. Cannot fetch transcript.' });
+        return { status: 403, body: { message: 'This is a private video. Cannot fetch transcript.' } };
       }
 
-      // const transcriptText = await getSubtitles({ videoID: videoID, lang });
-      // lines is your array of { start, dur, text }
       const transcriptFetchStart = Date.now();
       const transcript = await fetchTranscriptText(videoID, lang);
       logStage(videoID, 'cache-miss language transcript fetch completed in', transcriptFetchStart);
 
-      // Update transcript array
       const transcriptArray = cached.transcript;
       transcriptArray.push({
         language: lang,
         title: videoInfo.videoDetails.title,
-        transcript: transcript
+        transcript: transcript,
       });
 
-      // Save updated array
       const firestoreWriteStart = Date.now();
       await docRef.set({
         videoID: cached.videoID,
         duration: cached.duration,
         transcript: transcriptArray,
         availableLanguages: availableLanguages,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       logStage(videoID, 'cache-miss language firestore write completed in', firestoreWriteStart);
 
-      return res.json({
-        videoID: cached.videoID,
-        duration: cached.duration,
-        title: videoInfo.videoDetails.title,
-        transcript: transcript,
-        transcriptLanguageCode: lang,
-        languages: availableLanguages.length > 0 ? availableLanguages : undefined
-      });
+      return {
+        status: 200,
+        body: {
+          videoID: cached.videoID,
+          duration: cached.duration,
+          title: videoInfo.videoDetails.title,
+          transcript: transcript,
+          transcriptLanguageCode: lang,
+          languages: availableLanguages.length > 0 ? availableLanguages : undefined,
+        },
+      };
     }
 
-    // ------------------------------
-    // No cached transcript → fetch video info and captions
-    // ------------------------------
     const videoInfoStart = Date.now();
     const videoInfo = await safeGetVideoInfo(url, videoID);
     logStage(videoID, 'initial video info completed in', videoInfoStart);
@@ -691,45 +746,35 @@ app.post('/simple-transcript-v3', async (req, res) => {
       captionTrackCount: videoInfo?.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks?.length || 0,
     });
     if (!videoInfo) {
-      return res.status(403).json({ message: 'This is a private video. Cannot fetch transcript.' });
+      return { status: 403, body: { message: 'This is a private video. Cannot fetch transcript.' } };
     }
-
 
     const duration = Math.floor(videoInfo.videoDetails.lengthSeconds / 60);
     const captionTracks = videoInfo.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
     if (!captionTracks || captionTracks.length === 0) {
-      return res.status(404).json({ message: 'No captions available for this video.' });
+      return { status: 404, body: { message: 'No captions available for this video.' } };
     }
 
-    // Prepare available languages list (to be saved to Firestore)
     const availableLanguages = captionTracks.map(track => ({
       name: track.name.simpleText,
-      code: track.languageCode
+      code: track.languageCode,
     }));
 
-    // Load or initialize transcript array
-    const existingData = doc.exists ? doc.data() : null;
-    let transcriptArray = existingData ? existingData.transcript : [];
-
+    let transcriptArray = doc.exists ? doc.data().transcript : [];
     let transcriptText = '';
     let selectedLanguageCode = '';
 
-    // ------------------------------
-    // Determine which language to fetch
-    // ------------------------------
     if (lang) {
       const langTrack = captionTracks.find(track => track.languageCode === lang);
       if (!langTrack) {
-        return res.status(404).json({ message: `No captions available in the requested language (${lang}).` });
+        return { status: 404, body: { message: `No captions available in the requested language (${lang}).` } };
       }
 
       selectedLanguageCode = lang;
-      // lines is your array of { start, dur, text }
       const transcriptFetchStart = Date.now();
       transcriptText = await fetchTranscriptText(videoID, selectedLanguageCode);
       logStage(videoID, 'requested language transcript fetch completed in', transcriptFetchStart);
-
     } else {
       const preferredTrack = captionTracks.find(track => track.languageCode.startsWith('en') && track.kind !== 'asr')
         || captionTracks.find(track => track.languageCode.startsWith('en'))
@@ -741,67 +786,119 @@ app.post('/simple-transcript-v3', async (req, res) => {
       logStage(videoID, 'preferred language transcript fetch completed in', transcriptFetchStart);
     }
 
-    // ------------------------------
-    // Update transcript array (add or update)
-    // ------------------------------
     const existingIndex = transcriptArray.findIndex(t => t.language === selectedLanguageCode);
 
     if (existingIndex !== -1) {
-      // Update existing transcript
       transcriptArray[existingIndex] = {
         language: selectedLanguageCode,
         title: videoInfo.videoDetails.title,
-        transcript: transcriptText
+        transcript: transcriptText,
       };
     } else {
-      // Add new transcript
       transcriptArray.push({
         language: selectedLanguageCode,
         title: videoInfo.videoDetails.title,
-        transcript: transcriptText
+        transcript: transcriptText,
       });
     }
 
-    // ------------------------------
-    // Save everything to Firestore
-    // ------------------------------
     const firestoreWriteStart = Date.now();
     await docRef.set({
       videoID: videoID,
       duration: duration,
       transcript: transcriptArray,
       availableLanguages: availableLanguages,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
     logStage(videoID, 'firestore write completed in', firestoreWriteStart);
     console.log(`Transcript saved to Firebase for ${videoID}`);
 
-    // ------------------------------
-    // Return response
-    // ------------------------------
-    res.json({
-      videoID: videoID,
-      duration: duration,
-      title: videoInfo.videoDetails.title,
-      transcript: transcriptText,
-      transcriptLanguageCode: selectedLanguageCode,
-      languages: availableLanguages.length > 0 ? availableLanguages : undefined,
-      videoInfoSummary: {
-        author: videoInfo.videoDetails.author,
-        description: videoInfo.videoDetails.description,
-        embed: videoInfo.videoDetails.embed,
-        thumbnails: videoInfo.videoDetails.thumbnails,
-        viewCount: videoInfo.videoDetails.viewCount,
-        publishDate: videoInfo.videoDetails.publishDate,
-        video_url: videoInfo.videoDetails.video_url,
-      }
-    });
-
+    return {
+      status: 200,
+      body: {
+        videoID: videoID,
+        duration: duration,
+        title: videoInfo.videoDetails.title,
+        transcript: transcriptText,
+        transcriptLanguageCode: selectedLanguageCode,
+        languages: availableLanguages.length > 0 ? availableLanguages : undefined,
+        videoInfoSummary: {
+          author: videoInfo.videoDetails.author,
+          description: videoInfo.videoDetails.description,
+          embed: videoInfo.videoDetails.embed,
+          thumbnails: videoInfo.videoDetails.thumbnails,
+          viewCount: videoInfo.videoDetails.viewCount,
+          publishDate: videoInfo.videoDetails.publishDate,
+          video_url: videoInfo.videoDetails.video_url,
+        },
+      },
+    };
   } catch (error) {
     console.error('Error:', error);
-    res.status(500).json({ message: 'An error occurred while fetching and saving the transcript.' });
+    return {
+      status: 500,
+      body: { message: 'An error occurred while fetching and saving the transcript.' },
+    };
   }
+}
+
+app.post('/simple-transcript-v3', async (req, res) => {
+  const requestId = getRequestId(req);
+  const result = await executeSimpleTranscriptV3(req.body || {}, requestId);
+  return res.status(result.status).json(result.body);
+});
+
+app.post('/simple-transcript-v3/async', async (req, res) => {
+  const requestId = getRequestId(req);
+  transcriptJobStore.create(requestId);
+
+  setImmediate(async () => {
+    transcriptJobStore.start(requestId);
+    const result = await executeSimpleTranscriptV3(req.body || {}, requestId);
+    if (result.status >= 200 && result.status < 300) {
+      transcriptJobStore.succeed(requestId, result.body);
+    } else {
+      transcriptJobStore.fail(requestId, result.body);
+    }
+  });
+
+  return res.status(202).json({
+    requestId,
+    status: 'queued',
+    statusUrl: `/transcript-status/${requestId}`,
+  });
+});
+
+app.get('/transcript-status/:requestId', async (req, res) => {
+  const requestId = req.params?.requestId;
+  if (!requestId) {
+    return res.status(400).json({ error: 'Missing requestId', code: 'REQUEST_ID_REQUIRED' });
+  }
+
+  const job = transcriptJobStore.get(requestId);
+  if (!job) {
+    return res.status(404).json({
+      error: 'Transcript request not found or expired',
+      code: 'TRANSCRIPT_REQUEST_NOT_FOUND',
+      requestId,
+    });
+  }
+
+  if (job.status === 'succeeded') {
+    return res.status(200).json({ requestId, status: job.status, result: job.result });
+  }
+
+  if (job.status === 'failed') {
+    return res.status(200).json({ requestId, status: job.status, error: job.error });
+  }
+
+  return res.status(200).json({
+    requestId,
+    status: job.status,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  });
 });
 
 /**
