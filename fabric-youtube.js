@@ -54,8 +54,13 @@ async function readFirstFileByExtension(dirPath, ext) {
   return path.join(dirPath, files[0]);
 }
 
+function durationMs(startTime) {
+  return Date.now() - startTime;
+}
+
 async function fabricFetchTranscript(videoID, lang = 'en') {
-  console.log('===> fabricFetchTranscript')
+  const requestStart = Date.now();
+  console.log(`[fabric][${videoID}] start lang=${lang}`);
   if (!videoID) throw new Error('Missing YouTube URL');
 
   const { path: tmpDirPath, cleanup } = await tmp.dir({ unsafeCleanup: true });
@@ -75,18 +80,23 @@ async function fabricFetchTranscript(videoID, lang = 'en') {
   ];
 
   try {
+    const ytDlpStart = Date.now();
     await new Promise((resolve, reject) => {
       execFile('yt-dlp', args, (error, stdout, stderr) => {
         if (error) return reject(new Error(`yt-dlp failed: ${stderr}`));
         resolve();
       });
     });
+    console.log(`[fabric][${videoID}] yt-dlp completed in ${durationMs(ytDlpStart)}ms`);
 
+    const parseStart = Date.now();
     const jsonPath = await readFirstFileByExtension(tmpDirPath, '.json3');
     if (jsonPath) {
       const content = fs.readFileSync(jsonPath, 'utf-8');
       const parsed = parseTranscriptJson3(JSON.parse(content));
       if (parsed.length) {
+        console.log(`[fabric][${videoID}] json3 parse completed in ${durationMs(parseStart)}ms`);
+        console.log(`[fabric][${videoID}] total completed in ${durationMs(requestStart)}ms`);
         return parsed.map(item => item.text).join(' ');
       }
     }
@@ -94,12 +104,15 @@ async function fabricFetchTranscript(videoID, lang = 'en') {
     const vttPath = await readFirstFileByExtension(tmpDirPath, '.vtt');
     if (vttPath) {
       const content = fs.readFileSync(vttPath, 'utf-8');
+      console.log(`[fabric][${videoID}] vtt parse completed in ${durationMs(parseStart)}ms`);
+      console.log(`[fabric][${videoID}] total completed in ${durationMs(requestStart)}ms`);
       return cleanVttContent(content);
     }
 
     throw new Error('No JSON3 or VTT subtitles found');
   } finally {
     cleanup();
+    console.log(`[fabric][${videoID}] cleanup completed in ${durationMs(requestStart)}ms`);
   }
 }
 
