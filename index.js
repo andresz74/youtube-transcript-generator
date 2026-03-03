@@ -517,6 +517,57 @@ function logStage(videoID, stage, startTime) {
   console.log(`[transcript][${videoID}] ${stage} ${durationMs(startTime)}ms`);
 }
 
+async function tryTranscriptStrategy(videoID, strategyName, loader) {
+  const startTime = Date.now();
+  console.log(`[transcript][${videoID}] ${strategyName} start`);
+
+  try {
+    const transcript = await loader();
+    if (!transcript || !transcript.trim()) {
+      throw new Error('empty transcript');
+    }
+
+    logStage(videoID, `${strategyName} succeeded in`, startTime);
+    return transcript;
+  } catch (error) {
+    logStage(videoID, `${strategyName} failed in`, startTime);
+    console.warn(`[transcript][${videoID}] ${strategyName} failed: ${error.message}`);
+    return '';
+  }
+}
+
+async function fetchTranscriptText(videoID, languageCode) {
+  let transcript = await tryTranscriptStrategy(videoID, 'getSubtitles', async () => {
+    const lines = await getSubtitles({ videoID, lang: languageCode });
+    if (!lines || lines.length === 0) {
+      throw new Error('getSubtitles returned empty result');
+    }
+
+    return lines.map(item => item.text).join(' ');
+  });
+
+  if (transcript) {
+    return transcript;
+  }
+
+  transcript = await tryTranscriptStrategy(videoID, 'fetchTranscript', async () => {
+    const lines = await fetchTranscript(videoID, languageCode);
+    if (!lines || lines.length === 0) {
+      throw new Error('fetchTranscript returned empty result');
+    }
+
+    return lines.map(item => item.text).join(' ');
+  });
+
+  if (transcript) {
+    return transcript;
+  }
+
+  return await tryTranscriptStrategy(videoID, 'fabricFetchTranscript', async () => {
+    return await fabricFetchTranscript(videoID, languageCode);
+  });
+}
+
 async function safeGetVideoInfo(url, videoID = 'unknown') {
   const startTime = Date.now();
   console.log(`[transcript][${videoID}] safeGetVideoInfo start`);
@@ -595,7 +646,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
       // const transcriptText = await getSubtitles({ videoID: videoID, lang });
       // lines is your array of { start, dur, text }
       const transcriptFetchStart = Date.now();
-      const transcript = await fabricFetchTranscript(videoID, lang);
+      const transcript = await fetchTranscriptText(videoID, lang);
       logStage(videoID, 'cache-miss language transcript fetch completed in', transcriptFetchStart);
 
       // Update transcript array
@@ -676,7 +727,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
       selectedLanguageCode = lang;
       // lines is your array of { start, dur, text }
       const transcriptFetchStart = Date.now();
-      transcriptText = await fabricFetchTranscript(videoID, selectedLanguageCode);
+      transcriptText = await fetchTranscriptText(videoID, selectedLanguageCode);
       logStage(videoID, 'requested language transcript fetch completed in', transcriptFetchStart);
 
     } else {
@@ -686,7 +737,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
       selectedLanguageCode = preferredTrack.languageCode;
       const transcriptFetchStart = Date.now();
-      transcriptText = await fabricFetchTranscript(videoID, selectedLanguageCode);
+      transcriptText = await fetchTranscriptText(videoID, selectedLanguageCode);
       logStage(videoID, 'preferred language transcript fetch completed in', transcriptFetchStart);
     }
 
