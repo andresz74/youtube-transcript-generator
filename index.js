@@ -57,7 +57,7 @@ app.use((req, res, next) => {
  *   200: 'OK' message indicating the server is operational.
  */
 app.get('/health', (req, res) => {
-  res.send('OK');
+  res.status(200).type('text/plain').send('OK');
 });
 
 /**
@@ -509,12 +509,23 @@ app.post('/simple-transcript-v2', async (req, res) => {
  * 
  *   500: An error occurred while fetching or saving the transcript.
  */
-async function safeGetVideoInfo(url) {
-  console.log('===> safeGetVideoInfo');
+function durationMs(startTime) {
+  return Date.now() - startTime;
+}
+
+function logStage(videoID, stage, startTime) {
+  console.log(`[transcript][${videoID}] ${stage} ${durationMs(startTime)}ms`);
+}
+
+async function safeGetVideoInfo(url, videoID = 'unknown') {
+  const startTime = Date.now();
+  console.log(`[transcript][${videoID}] safeGetVideoInfo start`);
   try {
-    console.log('===> safeGetVideoInfo try');
-    return await ytdl.getBasicInfo(url);
+    const info = await ytdl.getBasicInfo(url);
+    logStage(videoID, 'safeGetVideoInfo done in', startTime);
+    return info;
   } catch (err) {
+    logStage(videoID, 'safeGetVideoInfo failed in', startTime);
     if (err.message.includes('private video')) {
       return null; // signal to caller
     }
@@ -574,14 +585,18 @@ app.post('/simple-transcript-v3', async (req, res) => {
       }
 
       // 🚨 Lang requested and NOT cached → FETCH FROM YOUTUBE
-      const videoInfo = await safeGetVideoInfo(url);
+      const videoInfoStart = Date.now();
+      const videoInfo = await safeGetVideoInfo(url, videoID);
+      logStage(videoID, 'cache-miss language video info completed in', videoInfoStart);
       if (!videoInfo) {
         return res.status(403).json({ message: 'This is a private video. Cannot fetch transcript.' });
       }
 
       // const transcriptText = await getSubtitles({ videoID: videoID, lang });
       // lines is your array of { start, dur, text }
+      const transcriptFetchStart = Date.now();
       const transcript = await fabricFetchTranscript(videoID, lang);
+      logStage(videoID, 'cache-miss language transcript fetch completed in', transcriptFetchStart);
 
       // Update transcript array
       const transcriptArray = cached.transcript;
@@ -592,6 +607,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
       });
 
       // Save updated array
+      const firestoreWriteStart = Date.now();
       await docRef.set({
         videoID: cached.videoID,
         duration: cached.duration,
@@ -599,6 +615,8 @@ app.post('/simple-transcript-v3', async (req, res) => {
         availableLanguages: availableLanguages,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
+
+      logStage(videoID, 'cache-miss language firestore write completed in', firestoreWriteStart);
 
       return res.json({
         videoID: cached.videoID,
@@ -613,8 +631,14 @@ app.post('/simple-transcript-v3', async (req, res) => {
     // ------------------------------
     // No cached transcript → fetch video info and captions
     // ------------------------------
-    const videoInfo = await safeGetVideoInfo(url);
-    console.log('===> videoInfo:', videoInfo);
+    const videoInfoStart = Date.now();
+    const videoInfo = await safeGetVideoInfo(url, videoID);
+    logStage(videoID, 'initial video info completed in', videoInfoStart);
+    console.log(`[transcript][${videoID}] video details loaded`, {
+      title: videoInfo?.videoDetails?.title,
+      lengthSeconds: videoInfo?.videoDetails?.lengthSeconds,
+      captionTrackCount: videoInfo?.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks?.length || 0,
+    });
     if (!videoInfo) {
       return res.status(403).json({ message: 'This is a private video. Cannot fetch transcript.' });
     }
@@ -651,7 +675,9 @@ app.post('/simple-transcript-v3', async (req, res) => {
 
       selectedLanguageCode = lang;
       // lines is your array of { start, dur, text }
+      const transcriptFetchStart = Date.now();
       transcriptText = await fabricFetchTranscript(videoID, selectedLanguageCode);
+      logStage(videoID, 'requested language transcript fetch completed in', transcriptFetchStart);
 
     } else {
       const preferredTrack = captionTracks.find(track => track.languageCode.startsWith('en') && track.kind !== 'asr')
@@ -659,7 +685,9 @@ app.post('/simple-transcript-v3', async (req, res) => {
         || captionTracks[0];
 
       selectedLanguageCode = preferredTrack.languageCode;
+      const transcriptFetchStart = Date.now();
       transcriptText = await fabricFetchTranscript(videoID, selectedLanguageCode);
+      logStage(videoID, 'preferred language transcript fetch completed in', transcriptFetchStart);
     }
 
     // ------------------------------
@@ -686,6 +714,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
     // ------------------------------
     // Save everything to Firestore
     // ------------------------------
+    const firestoreWriteStart = Date.now();
     await docRef.set({
       videoID: videoID,
       duration: duration,
@@ -694,6 +723,7 @@ app.post('/simple-transcript-v3', async (req, res) => {
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
+    logStage(videoID, 'firestore write completed in', firestoreWriteStart);
     console.log(`Transcript saved to Firebase for ${videoID}`);
 
     // ------------------------------
